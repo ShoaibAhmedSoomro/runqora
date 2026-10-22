@@ -14,3 +14,4 @@ Thumbs.db
 # local design notes and logo explorations (not part of the app)
 replica/
 logos/
+app/src-tauri/.cargo/

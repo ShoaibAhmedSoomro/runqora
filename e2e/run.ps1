@@ -25,7 +25,7 @@ function Rq { & $Rq @args 2>&1 | Out-String }
 function Code { $global:LASTEXITCODE }
 function Hash($p) { (Get-FileHash $p -Algorithm SHA256).Hash }
 function Listening($port) { [bool](Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue) }
-function Get-Page($url) { try { (Invoke-WebRequest $url -UseBasicParsing -TimeoutSec 15) } catch { $null } }
+function Get-Page($url, $sec = 15) { try { (Invoke-WebRequest $url -UseBasicParsing -TimeoutSec $sec) } catch { $null } }
 function Stranger($port) { Start-Process powershell -ArgumentList '-NoProfile', '-Command', "`$l=[Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback,$port); `$l.Start(); Start-Sleep 180" -WindowStyle Hidden -PassThru }
 
 if (-not (Test-Path "$Root\apache\bin\httpd.exe") -or -not (Test-Path $Rq)) { Write-Host "Need an installed stack in $Root and $Rq" -ForegroundColor Red; exit 99 }
@@ -45,7 +45,7 @@ Check "F09-E1" "status lists every module" { $o = Rq status; ($o -match "apache"
 Write-Host "`nF01 start"
 Check "F01-H1" "start brings up Apache and MariaDB (exit 0)" { Rq start | Out-Null; (Code) -eq 0 -and (Listening $ApachePort) -and (Listening $DbPort) }
 Check "F01-H2" "Apache serves a page and PHP runs inside it" { $p = Get-Page "http://127.0.0.1:$ApachePort/"; $p -and $p.StatusCode -eq 200 }
-Check "F01-H3" "phpMyAdmin answers 200 on the same server" { (Get-Page "http://127.0.0.1:$ApachePort/phpmyadmin/").StatusCode -eq 200 }
+Check "F01-H3" "phpMyAdmin answers 200 on the same server" { (Get-Page "http://127.0.0.1:$ApachePort/phpmyadmin/" 120).StatusCode -eq 200 } # the first request after a cold start reads thousands of files: 30+ s with real-time virus scanning
 Check "F01-H4" "MariaDB accepts a connection and reports its port" { (& "$Root\mariadb\bin\mysql.exe" @('-uroot', '--host=127.0.0.1', "--port=$DbPort", '-N', '-e', 'select @@port') 2>&1) -match "$DbPort" }
 Check "F01-E1" "starting again is harmless (exit 0, says already running)" { $o = Rq start; (Code) -eq 0 -and $o -match "already running" }
 Check "F01-E2" "start piped to another command returns promptly (no inherited pipe)" { Rq stop | Out-Null; $t = [Diagnostics.Stopwatch]::StartNew(); & $Rq start | Out-Null; $t.Elapsed.TotalSeconds -lt 60 }

@@ -60,11 +60,14 @@ const NOTE = {
   mailpit: "Catches every email your PHP sites send and shows it on the Open page, so nothing leaves this PC. PHP is pointed at it for you (SMTP port 1025).",
   sftpgo: "FTP on port 21 and SFTP on port 2022, this PC only. The first time you Open it, it asks you to make an admin account.",
   wordpress: "The WordPress files. New WordPress site copies them into a new site, makes its database and fills in wp-config.php.",
+  node: "Node.js with npm, for build tools and JavaScript servers. Runqora keeps the long-term-support line current.",
+  composer: "PHP's package manager. In a terminal: C:\\Runqora\\composer\\composer.bat install (it runs on Runqora's PHP).",
+  adminer: "A one-file database tool at http://localhost/adminer/adminer.php (this PC only). It refuses accounts without a password; for the password-less root account use phpMyAdmin.",
 };
 const STATUS = { missing: "Not installed", installed: "Installed", stopped: "Stopped", running: "Running", blocked: "Port in use" };
 const G = { play: 0xe768, stop: 0xe71a, globe: 0xe774, page: 0xe7c3, down: 0xe70d, download: 0xe896, ok: 0xe930, err: 0xea39, warn: 0xe7ba, info: 0xe946, close: 0xe711, folder: 0xe8b7, sync: 0xe895, back: 0xe7a7, link: 0xe71b };
 
-const view = { modules: [], externals: [], sites: [], loaded: false, entered: false, updEntered: false, updates: null, checking: false, checkedAt: null, autoMode: "notify", settingsTab: "general", problems: 0, page: "modules", open: new Set(), busy: new Map(), log: [], bars: [], errors: 0, json: "" };
+const view = { appUpdate: null, appVersion: "", modules: [], externals: [], sites: [], loaded: false, entered: false, updEntered: false, updates: null, checking: false, checkedAt: null, autoMode: "notify", settingsTab: "general", problems: 0, page: "modules", open: new Set(), busy: new Map(), log: [], bars: [], errors: 0, json: "" };
 
 // ---- appearance: theme and accent, synced with Windows ----
 const dark = matchMedia("(prefers-color-scheme: dark)");
@@ -632,10 +635,51 @@ const MODE_TEXT = {
 const newest = (u) => u.candidates.filter((c) => c.kind === "patch").at(-1); // candidates arrive oldest to newest
 const hasNews = (u) => u.candidates.length > 0;
 
+/** Runqora's own newest release on GitHub. Quiet when `silent`; tells the user once per new version. */
+async function checkApp(silent = true) {
+  let u = null;
+  try { u = await invoke("app_update_check"); } catch (e) { if (!silent) note("error", "Couldn't check for a new Runqora.", String(e)); }
+  const fresh = u && (!view.appUpdate || view.appUpdate.latest !== u.latest);
+  view.appUpdate = u;
+  if (fresh && silent) note("info", "", `Runqora ${u.latest} is available.`, { label: "View", run: () => goto("updates") });
+  paintNav();
+  if (view.page === "updates") paintUpdates();
+}
+
+async function installApp(u) {
+  const ok = await dialog({
+    title: `Update Runqora to ${u.latest}?`,
+    content: [h("p", {}, `Runqora ${u.current} goes to ${u.latest}. The installer opens and Runqora closes so it can be replaced; your servers keep running and your settings and data are untouched.`), h("p", { class: "muted small" }, "The installer is downloaded from this project's GitHub release and checked against the checksum GitHub shows for it before it opens.")],
+    confirm: "Download and install",
+  });
+  if (!ok) return;
+  view.busy.set("upd:app", "Downloading the installer...");
+  paintUpdates();
+  try { note("success", "", await invoke("app_update_install")); } catch (e) { note("error", "Couldn't update Runqora.", String(e)); }
+  view.busy.delete("upd:app");
+  paintUpdates();
+}
+
+function appUpdateCard() {
+  const u = view.appUpdate, busy = view.busy.get("upd:app");
+  const status = busy ? h("div", { class: "status" }, h("span", { class: "ring" }), busy) : u ? h("div", { class: "status avail" }, h("span", { class: "dot" }), `Update available: ${u.latest}`) : h("div", { class: "status running" }, h("span", { class: "dot" }), "Up to date");
+  const actions = h("div", { class: "actions" }, u && h("button", { class: "btn accent", disabled: !!busy, data: { key: "upd:app:install" }, on: { click: () => installApp(u) } }, icon(G.download), "Update"));
+  const inner = h("div", { class: "inner" });
+  if (u) {
+    inner.append(h("div", { class: "row" }, h("div", { class: "label" }, h("div", { class: "strong" }, `${u.latest} `, h("span", { class: "tag" }, "New version")), h("div", { class: "muted small", style: "white-space:pre-line" }, u.body || "See the release page for what is new.")), h("button", { class: "btn sm", on: { click: () => invoke("open_notes", { url: u.notes_url }).catch((e) => note("error", "", String(e))) } }, icon(G.link), "What's new")));
+  }
+  const head = h("div", { class: "module-head" },
+    h("div", { class: "tile", "aria-hidden": "true" }, h("img", { class: "logo-img-mark", alt: "", src: "logos/runqora.svg", style: "--size:24px" })),
+    h("div", { class: "titles" }, h("div", { class: "name" }, "Runqora"), h("div", { class: "muted small" }, `Installed ${u?.current || view.appVersion || ""} · this app`)),
+    status, actions);
+  return h("article", { class: "card", "aria-label": "Runqora" }, head, inner.children.length && h("div", { class: "module-body open" }, inner));
+}
+
 async function checkUpdates() {
   if (view.checking) return;
   view.checking = true;
   paintUpdates();
+  checkApp(false);
   try {
     view.updates = await invoke("updates_check");
     view.checkedAt = new Date();
@@ -758,6 +802,7 @@ function paintUpdates() {
     : view.updates.length ? view.updates.map(updateCard) : [h("div", { class: "card" }, h("div", { class: "empty" }, "Nothing is installed yet. Install a module on the Modules page first."))];
   $("#updates").replaceChildren(
     h("div", { class: "card" }, setRow("Update automatically", MODE_TEXT[view.autoMode], h("div", { class: "control" }, mode))),
+    appUpdateCard(),
     ...list,
   );
   if (view.updates && !view.updEntered) setTimeout(() => (view.updEntered = true), 900);
@@ -772,7 +817,7 @@ function paintNav() {
   c.hidden = !view.errors;
   c.textContent = view.errors;
   c.setAttribute("aria-label", `${view.errors} new errors`);
-  const n = (view.updates || []).filter(hasNews).length;
+  const n = (view.updates || []).filter(hasNews).length + (view.appUpdate ? 1 : 0);
   const u = $("#updcount");
   u.hidden = !n;
   u.textContent = n;
@@ -821,9 +866,14 @@ note("info", "", "Ready.");
 refresh(true);
 refreshProblems();
 loadAppearance();
+invoke("app_info").then((i) => (view.appVersion = i.version)).catch(() => {});
 invoke("settings_get").then((s) => {
   view.autoMode = ["off", "notify", "install"].includes(s.auto_update) ? s.auto_update : "notify";
-  if (view.autoMode !== "off") setTimeout(checkUpdates, 3000); // quietly fills the badge on the Updates item
+  if (view.autoMode !== "off") {
+    setTimeout(checkUpdates, 3000); // quietly fills the badge on the Updates item
+    // a release published while Runqora is open shows up here within half an hour, no restart needed
+    setInterval(() => { if (view.autoMode !== "off") checkApp(true); }, 30 * 60 * 1000);
+  }
 }).catch(() => {});
 // ponytail: poll; the core could push events if 2 s latency matters
 async function pullNotes() {

@@ -16,7 +16,8 @@
         "height": 700,
         "minWidth": 560,
         "minHeight": 480,
-        "transparent": true
+        "transparent": true,
+        "visible": false
       }
     ],
     "security": {

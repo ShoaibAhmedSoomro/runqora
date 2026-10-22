@@ -49,7 +49,9 @@
 
 **Windows 11 look and feel**
 - Fluent design with Mica, light and dark themes that follow Windows, and an accent colour that follows yours
-- Responsive layout that fills the window at any size; system tray with Start all and Stop all
+- Responsive layout that fills the window at any size
+- Lives in the system tray like XAMPP's control panel: closing the window keeps Runqora running, and the tray menu has a submenu per server (status dot, Start/Stop, Open, Settings, config files and logs), Start all, Stop all and Quit
+- Optional start at Windows sign-in, hidden in the tray; a second launch just brings the running copy forward
 - A full command line, `rq`, for everything the window does
 
 <p align="center">

@@ -859,6 +859,13 @@ document.addEventListener("pointermove", (e) => {
   c.style.setProperty("--my", `${e.clientY - r.top}px`);
 });
 
+// the tray menu's "Settings..." on a server: show that server's settings
+window.__TAURI__?.event?.listen("navigate", (e) => {
+  const { page, tab } = e.payload || {};
+  if (page === "settings" && TABS.some((t) => t[0] === tab)) view.settingsTab = tab;
+  if (["modules", "sites", "updates", "ports", "activity", "settings", "about"].includes(page)) goto(page);
+});
+invoke("ui_ready").catch(() => {}); // the window is shown once the page is ready
 paintNav();
 paintLog();
 paintModules();

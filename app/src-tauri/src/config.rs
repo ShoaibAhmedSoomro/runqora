@@ -35,6 +35,7 @@ const D: Def = Def { module: "", key: "", label: "", help: "", kind: "text", cho
 const DEFS: &[Def] = &[
     Def { module: "general", key: "editor", label: "Editor", help: "The program that opens configuration files and logs.", kind: "text", default: "notepad.exe", group: "General", ..D },
     Def { module: "general", key: "auto_update", label: "Update automatically", help: "Patch updates install themselves only while the servers are stopped; bigger upgrades always ask first.", kind: "choice", choices: &[("off", "Off"), ("notify", "Tell me about updates"), ("install", "Install patch updates automatically")], default: "notify", group: "Updates", ..D },
+    Def { module: "general", key: "launch_at_login", label: "Start Runqora when I sign in", help: "Opens Runqora hidden in the tray when you sign in to Windows. Servers marked Start with Runqora then start by themselves.", kind: "bool", default: "off", group: "Startup", ..D },
     Def { module: "general", key: "theme", label: "Theme", help: "Light, dark, or follow the Windows setting as it changes.", kind: "choice", choices: &[("system", "Match Windows"), ("light", "Light"), ("dark", "Dark")], default: "system", group: "Appearance", ..D },
     Def { module: "general", key: "accent_mode", label: "Accent colour", help: "Buttons, switches and highlights. Match Windows follows your personalisation colour live.", kind: "choice", choices: &[("system", "Match Windows"), ("custom", "Choose a colour")], default: "system", group: "Appearance", ..D },
     Def { module: "general", key: "accent_color", label: "Your colour", help: "Used when the accent is set to a custom colour. Text on it is kept readable automatically.", kind: "color", default: "#0067C0", group: "Appearance", ..D },
@@ -260,6 +261,7 @@ fn read_value(root: &Path, module: &str, key: &str) -> Option<String> {
     match (module, key) {
         ("general", "editor") => Some(if s.editor.is_empty() { "notepad.exe".into() } else { s.editor }),
         ("general", "auto_update") => Some(if s.auto_update.is_empty() { "notify".into() } else { s.auto_update }),
+        ("general", "launch_at_login") => Some(on_off(crate::launch_at_login())),
         ("general", k @ ("theme" | "accent_mode" | "accent_color")) => s.custom.get(&format!("general.{k}")).cloned(),
         (m, "port") => component_with(m, &s).ok().map(|c| c.port.to_string()),
         (m, "autostart") => Some(on_off(s.autostart.get(m).copied().unwrap_or(false))),
@@ -421,6 +423,7 @@ pub fn config_set(root: &Path, module: &str, key: &str, raw: &str, dry: bool) ->
     match (module, key.as_str()) {
         ("general", "editor") => return set_editor_in(root, &v).map(|m| Applied { changed: true, message: m, restart: None }),
         ("general", "auto_update") => return set_auto_update_in(root, &v).map(|m| Applied { changed: true, message: m, restart: None }),
+        ("general", "launch_at_login") => return crate::set_launch_at_login(v == "on").map(|m| Applied { changed: true, message: m, restart: None }),
         ("general", k @ ("theme" | "accent_mode" | "accent_color")) => {
             let mut s = settings_in(root);
             s.custom.insert(format!("general.{k}"), v.clone());

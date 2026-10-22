@@ -3,6 +3,8 @@
 //! The window. All logic lives in the library (shared with the `runtime` command line); this file
 //! only exposes it to the UI and owns the tray.
 
+mod tray;
+
 use runqora as rt;
 use serde::Serialize;
 use std::{fs, os::windows::process::CommandExt, process::Command};
@@ -242,6 +244,17 @@ fn open_developer(id: String) -> Result<(), String> {
     Command::new("cmd").args(["/C", "start", "", url]).creation_flags(NO_WINDOW).spawn().map(|_| ()).map_err(|e| e.to_string())
 }
 
+/// The page has loaded: show the window, unless Runqora was started hidden (at sign-in, in the tray).
+#[tauri::command]
+fn ui_ready(app: tauri::AppHandle) {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    static FIRST: AtomicBool = AtomicBool::new(true);
+    // only the first load decides; later reloads must not pop a window the user closed to the tray
+    if FIRST.swap(false, Ordering::Relaxed) && !std::env::args().any(|a| a == "--hidden") {
+        tray::show_window(&app);
+    }
+}
+
 /// Is there a newer Runqora release on GitHub?
 #[tauri::command]
 async fn app_update_check() -> Result<Option<rt::appupdate::AppUpdate>, String> {
@@ -377,25 +390,71 @@ fn toggle_window(app: &tauri::AppHandle) {
     }
 }
 
+/// One Runqora per install folder, so a second launch cannot add a second tray icon.
+fn instance_name(what: &str) -> Vec<u16> {
+    let key: String = rt::root().to_string_lossy().to_lowercase().chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '_' }).collect();
+    format!("Local\\Runqora_{what}_{key}\0").encode_utf16().collect()
+}
+
+/// True when another copy already runs here; it is then told to show its window (it may only be in the tray).
+fn already_running() -> bool {
+    use windows_sys::Win32::{
+        Foundation::{GetLastError, ERROR_ALREADY_EXISTS},
+        System::Threading::{CreateMutexW, OpenEventW, SetEvent},
+    };
+    // SAFETY: names are NUL-terminated; the mutex handle is kept for the life of the process on purpose
+    unsafe {
+        let h = CreateMutexW(std::ptr::null(), 0, instance_name("lock").as_ptr());
+        if h.is_null() || GetLastError() != ERROR_ALREADY_EXISTS {
+            return false;
+        }
+        let ev = OpenEventW(0x0002, 0, instance_name("show").as_ptr()); // EVENT_MODIFY_STATE
+        if !ev.is_null() {
+            SetEvent(ev);
+        }
+        true
+    }
+}
+
+/// The running copy waits for the "show" signal from a second launch and opens its window.
+fn listen_for_second_launch(app: tauri::AppHandle) {
+    use windows_sys::Win32::System::Threading::{CreateEventW, WaitForSingleObject};
+    // SAFETY: the event handle lives as long as the process; the thread only waits on it
+    let ev = unsafe { CreateEventW(std::ptr::null(), 0, 0, instance_name("show").as_ptr()) } as usize;
+    if ev == 0 {
+        return;
+    }
+    std::thread::spawn(move || loop {
+        // SAFETY: ev is the valid event handle created above
+        if unsafe { WaitForSingleObject(ev as _, u32::MAX) } == 0 {
+            // window calls only take effect on the main thread
+            let a = app.clone();
+            let _ = app.run_on_main_thread(move || tray::show_window(&a));
+        }
+    });
+}
+
 fn main() {
     use tauri::{
-        menu::{Menu, MenuItem},
         tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
         WindowEvent,
     };
+    if already_running() {
+        return; // the copy that is running (maybe only in the tray) was brought to the front
+    }
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
             modules_status, module_start, module_stop, component_install, module_admin, module_service, module_open_file, modules_all, ports_scan, take_notes,
             settings_get, settings_set_editor, settings_set_port, settings_set_autostart, settings_set_auto_update, app_info, open_root,
             updates_check, update_apply, update_rollback, open_notes, fx_enabled,
-            app_update_check, app_update_install, developer_links, open_developer, sites_list, site_add, site_remove, site_open_folder, wordpress_create, externals_status, external_start, external_stop, external_open, external_get, appearance, apply_theme, open_url, https_status, https_trust, https_untrust, https_regenerate, config_get, config_set, module_restart, config_export, config_import, config_ini_text, setup_check, setup_fix, setup_fix_all, port_remedy, port_end, port_stop_service, port_suggest
+            ui_ready, app_update_check, app_update_install, developer_links, open_developer, sites_list, site_add, site_remove, site_open_folder, wordpress_create, externals_status, external_start, external_stop, external_open, external_get, appearance, apply_theme, open_url, https_status, https_trust, https_untrust, https_regenerate, config_get, config_set, module_restart, config_export, config_import, config_ini_text, setup_check, setup_fix, setup_fix_all, port_remedy, port_end, port_stop_service, port_suggest
         ])
         .setup(|app| {
-            let item = |id: &str, label: &str| MenuItem::with_id(app, id, label, true, None::<&str>);
-            let menu = Menu::with_items(app, &[&item("show", "Show / Hide")?, &item("start_all", "Start all")?, &item("stop_all", "Stop all")?, &item("quit", "Quit")?])?;
-            TrayIconBuilder::new()
+            let handle = app.handle().clone();
+            let menu = tray::build(&handle, &tray::rows())?;
+            let tray_icon = TrayIconBuilder::new()
                 .icon(app.default_window_icon().expect("window icon is set by tauri.conf.json").clone())
-                .tooltip("Runqora")
+                .tooltip(tray::tooltip(&tray::rows()))
                 .menu(&menu)
                 .show_menu_on_left_click(false)
                 .on_menu_event(|app, e| match e.id.as_ref() {
@@ -403,7 +462,9 @@ fn main() {
                     "start_all" => rt::all_servers(true),
                     "stop_all" => rt::all_servers(false),
                     "quit" => app.exit(0), // servers keep running: they are independent processes
-                    _ => {}
+                    other => {
+                        tray::on_menu(app, other);
+                    }
                 })
                 .on_tray_icon_event(|tray, e| {
                     if let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, .. } = e {
@@ -411,7 +472,8 @@ fn main() {
                     }
                 })
                 .build(app)?;
-            // Mica needs Windows 11; where it is refused (Windows 10) the UI keeps its solid surfaces
+            tray::keep_fresh(handle.clone(), tray_icon);
+            listen_for_second_launch(handle);
             if let Some(w) = app.get_webview_window("main") {
                 // open at 85% of this screen (never smaller than the minimum), not a fixed 1040x700
                 if let Ok(Some(m)) = w.primary_monitor() {
@@ -420,9 +482,13 @@ fn main() {
                     let _ = w.set_size(tauri::LogicalSize::new(lw.max(560.0), lh.max(480.0)));
                     let _ = w.center();
                 }
+                // Mica needs Windows 11; where it is refused (Windows 10) the UI keeps its solid surfaces
                 use tauri::window::{Effect, EffectsBuilder};
                 let ok = w.set_effects(EffectsBuilder::new().effect(Effect::Mica).build()).is_ok();
                 FX.store(ok, std::sync::atomic::Ordering::Relaxed);
+                // started at sign-in (or with --hidden): live in the tray and stay out of the way
+                // the window starts hidden (visible:false in the config); the page asks to be shown once it has loaded
+                // (ui_ready), unless this start is --hidden, which stays in the tray until someone opens it
             }
             rt::run_autostart();
             rt::update::start_scheduler();
@@ -433,6 +499,10 @@ fn main() {
             if let WindowEvent::CloseRequested { api, .. } = e {
                 api.prevent_close();
                 let _ = w.hide();
+                static TOLD: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+                if !TOLD.swap(true, std::sync::atomic::Ordering::Relaxed) {
+                    rt::push_note("info", "Runqora is still running in the tray, so your servers stay manageable. Right-click the tray icon for them, or choose Quit to exit.".into());
+                }
             }
         })
         .run(tauri::generate_context!())

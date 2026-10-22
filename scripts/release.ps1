@@ -26,7 +26,7 @@ Set-Location $root
 
 if (git status --porcelain) { throw "Commit or stash your changes first: the release commit must contain only the version bump." }
 $old = (Select-String -Path "$tauri\Cargo.toml" -Pattern '^version = "(.+)"').Matches[0].Groups[1].Value
-if ([version]$Version -le [version]$old) { throw "Version $Version is not newer than $old." }
+if ([version]$Version -lt [version]$old) { throw "Version $Version is older than $old." }  # equal is fine: the bump may already be committed
 if (gh release view "v$Version" --repo $Repo 2>$null) { throw "Release v$Version already exists." }
 
 # 1. version
@@ -57,7 +57,7 @@ Write-Host "installer: $exe  sha256 $hash"
 
 # 4. commit, tag, push
 git add "$tauri\Cargo.toml" "$tauri\Cargo.lock" "$tauri\tauri.conf.json"
-git commit -m "chore: release $Version"
+if (git status --porcelain) { git commit -m "chore: release $Version" }
 git tag "v$Version"
 git push origin HEAD "v$Version"
 

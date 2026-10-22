@@ -538,6 +538,27 @@ fn candidates_for(c: &Component, root: &Path, current: &str, pma_json: Option<&s
     }
 }
 
+/// The component as the publisher offers it today: the newest version of the line the manifest pins (else the newest
+/// there is), with its own download address and checksum. Used when the pinned link no longer works.
+pub fn installable_now(c: &Component) -> Result<Component, String> {
+    let all = candidates_for(c, &root(), &c.version, None)?;
+    let line = line_of(&c.version);
+    let best = all.iter().filter(|x| x.line == line).max_by(|a, b| cmp_ver(&a.version, &b.version)).or_else(|| all.iter().max_by(|a, b| cmp_ver(&a.version, &b.version))).ok_or("the publisher offers nothing newer")?;
+    Ok(with_candidate(c, best))
+}
+
+/// `c` pointed at a candidate: its version, address, archive layout and checksum.
+pub fn with_candidate(c: &Component, cand: &Candidate) -> Component {
+    let (algo, hex) = cand.sha256.split_once(':').unwrap_or(("sha256", cand.sha256.as_str()));
+    let (mut sha256, mut sha512, mut sha1) = (String::new(), String::new(), String::new());
+    match algo {
+        "sha512" => sha512 = hex.to_string(),
+        "sha1" => sha1 = hex.to_string(),
+        _ => sha256 = hex.to_string(),
+    }
+    Component { version: cand.version.clone(), url: cand.url.clone(), strip_prefix: cand.strip_prefix.clone(), sha256, sha512, sha1, ..c.clone() }
+}
+
 /// What a probe against the real publishers returns for an installed-or-not module, pretending `current` is installed.
 pub fn probe(id: &str, current: &str) -> Result<Vec<Candidate>, String> {
     let c = component(id)?;

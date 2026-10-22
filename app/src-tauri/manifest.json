@@ -47,9 +47,9 @@
     {
       "id": "php",
       "name": "PHP (thread safe)",
-      "version": "8.3.35",
-      "url": "https://downloads.php.net/~windows/releases/php-8.3.35-Win32-vs16-x64.zip",
-      "sha256": "b454bed828a74536125d8a96119eae8ffbb186b305759dd6cf8d9bb4b55968b1",
+      "version": "8.3.36",
+      "url": "https://windows.php.net/downloads/releases/php-8.3.36-Win32-vs16-x64.zip",
+      "sha256": "0606810ff8fc232406aaab677b760e06af93a63a366d33ff738d4ce90501dfa5",
       "strip_prefix": "",
       "extract_to": "php",
       "binary": "php/php.exe",

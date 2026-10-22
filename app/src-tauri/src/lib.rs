@@ -136,6 +136,24 @@ pub fn component_with(id: &str, s: &Settings) -> Result<Component, String> {
     Ok(c)
 }
 
+const RUN_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
+
+/// Is Runqora set to open (hidden, in the tray) when this user signs in to Windows?
+pub fn launch_at_login() -> bool {
+    win::reg_get_string(RUN_KEY, "Runqora").is_some_and(|v| v.to_lowercase().contains("runqora"))
+}
+
+/// Turn "start when I sign in" on or off. Only this user's Run key is touched, and only when the user flips the setting.
+pub fn set_launch_at_login(on: bool) -> Result<String, String> {
+    if !on {
+        win::reg_delete(RUN_KEY, "Runqora");
+        return Ok("Runqora will not open when you sign in".into());
+    }
+    let exe = std::env::current_exe().ok().and_then(|p| p.parent().map(|d| d.join("runqora.exe"))).filter(|p| p.exists()).ok_or("the Runqora program was not found next to this one; change this setting from the window")?;
+    win::reg_set_string(RUN_KEY, "Runqora", &format!("\"{}\" --hidden", exe.display())).map_err(|e| format!("Windows refused (error {e})"))?;
+    Ok("Runqora will open in the tray when you sign in".into())
+}
+
 pub fn root() -> PathBuf {
     // not under OneDrive: synced folders break pid files and locked binaries
     if let Some(d) = std::env::var_os("RUNQORA_DIR") {
@@ -603,16 +621,61 @@ pub fn install(c: &Component, root: &Path) -> Result<(), String> {
             install(&need, root)?; // Tomcat brings the Java it runs on
         }
     }
+    // Publishers move old files (PHP puts a superseded release under /archives/) and re-issue builds, so a pinned link can
+    // stop working. Try the pinned link, then the same file's archive address (same checksum), then whatever the publisher
+    // offers today for the same release line. The first that downloads and verifies wins.
+    let mut failures: Vec<String> = vec![];
+    let mut sources = vec![c.clone()];
+    if let Some(url) = archive_url(&c.url) {
+        sources.push(Component { url, ..c.clone() });
+    }
+    let mut live_tried = false;
+    loop {
+        for src in std::mem::take(&mut sources) {
+            match install_one(&src, root) {
+                Ok(()) => return Ok(()),
+                Err(e) if e.contains("is already installed") => return Err(e),
+                Err(e) => failures.push(e),
+            }
+        }
+        if live_tried {
+            break;
+        }
+        live_tried = true;
+        match update::installable_now(c) {
+            Ok(live) => sources.push(live),
+            Err(e) => failures.push(format!("looking for a current version: {e}")),
+        }
+        if sources.is_empty() {
+            break;
+        }
+    }
+    Err(format!("{} could not be downloaded: {}", c.name, failures.join("; ")))
+}
+
+/// Download one source and install it. Everything downloaded is removed afterwards.
+fn install_one(c: &Component, root: &Path) -> Result<(), String> {
     let tmp = root.join("tmp");
     fs::create_dir_all(&tmp).map_err(|e| e.to_string())?;
     let part = tmp.join(format!("{}.zip.part", c.id));
-    let resp = ureq::get(&c.url).set("User-Agent", "runqora/0.1").call().map_err(|e| e.to_string())?;
-    io::copy(&mut resp.into_reader(), &mut fs::File::create(&part).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
     let zip = tmp.join(format!("{}.zip", c.id));
-    fs::rename(&part, &zip).map_err(|e| e.to_string())?;
-    let r = install_from_zip(c, &zip, root);
+    let result = (|| {
+        let resp = ureq::get(&c.url).set("User-Agent", "runqora/0.1").call().map_err(|e| format!("{}: {e}", c.url))?;
+        io::copy(&mut resp.into_reader(), &mut fs::File::create(&part).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+        fs::rename(&part, &zip).map_err(|e| e.to_string())?;
+        install_from_zip(c, &zip, root)
+    })();
+    let _ = fs::remove_file(&part);
     let _ = fs::remove_file(&zip); // bad or used, never reuse a download
-    r
+    result
+}
+
+/// PHP for Windows moves a release to /archives/ once a newer one is out; the file and its checksum stay the same.
+pub fn archive_url(url: &str) -> Option<String> {
+    const BASES: [&str; 2] = ["https://windows.php.net/downloads/releases/", "https://downloads.php.net/~windows/releases/"];
+    let base = BASES.iter().find(|b| url.starts_with(**b))?;
+    let file = &url[base.len()..];
+    (!file.contains('/')).then(|| format!("{base}archives/{file}"))
 }
 
 // ---- Win32 ----
@@ -660,6 +723,32 @@ pub mod win {
         // SAFETY: the API filled `n` rows right after the u32 count, inside buf
         let rows = unsafe { std::slice::from_raw_parts(buf.as_ptr().add(1).cast::<MIB_TCPROW_OWNER_PID>(), n) };
         rows.iter().map(|r| (u16::from_be(r.dwLocalPort as u16), r.dwOwningPid)).collect()
+    }
+
+    /// A text value under HKEY_CURRENT_USER.
+    pub fn reg_get_string(subkey: &str, name: &str) -> Option<String> {
+        use windows_sys::Win32::System::Registry::{RegGetValueW, HKEY_CURRENT_USER, RRF_RT_REG_SZ};
+        let (k, n) = (wide(subkey), wide(name));
+        let mut buf = vec![0u16; 1024];
+        let mut size = (buf.len() * 2) as u32;
+        // SAFETY: buf is valid for `size` bytes; the key and value names are NUL-terminated
+        let rc = unsafe { RegGetValueW(HKEY_CURRENT_USER, k.as_ptr(), n.as_ptr(), RRF_RT_REG_SZ, ptr::null_mut(), buf.as_mut_ptr().cast(), &mut size) };
+        (rc == 0).then(|| String::from_utf16_lossy(&buf[..(size as usize / 2).saturating_sub(1)]))
+    }
+
+    pub fn reg_set_string(subkey: &str, name: &str, value: &str) -> Result<(), u32> {
+        use windows_sys::Win32::System::Registry::{RegSetKeyValueW, HKEY_CURRENT_USER, REG_SZ};
+        let (k, n, v) = (wide(subkey), wide(name), wide(value));
+        // SAFETY: v is a NUL-terminated UTF-16 string and the byte count includes the terminator
+        let rc = unsafe { RegSetKeyValueW(HKEY_CURRENT_USER, k.as_ptr(), n.as_ptr(), REG_SZ, v.as_ptr().cast(), (v.len() * 2) as u32) };
+        if rc == 0 { Ok(()) } else { Err(rc) }
+    }
+
+    pub fn reg_delete(subkey: &str, name: &str) {
+        use windows_sys::Win32::System::Registry::{RegDeleteKeyValueW, HKEY_CURRENT_USER};
+        let (k, n) = (wide(subkey), wide(name));
+        // SAFETY: both names are NUL-terminated; a missing value is simply an error code we ignore
+        unsafe { RegDeleteKeyValueW(HKEY_CURRENT_USER, k.as_ptr(), n.as_ptr()) };
     }
 
     /// A DWORD value under HKEY_CURRENT_USER.
@@ -1510,6 +1599,47 @@ smtp_port = 1025
         let t = std::time::Instant::now();
         assert!(stop(&c, &r).unwrap().contains("stopped"), "the graceful word was understood");
         assert!(t.elapsed() < Duration::from_secs(10), "no forced kill needed");
+    }
+
+    #[test]
+    fn a_moved_php_release_is_found_in_the_archives() {
+        assert_eq!(archive_url("https://downloads.php.net/~windows/releases/php-8.3.35-Win32-vs16-x64.zip").as_deref(), Some("https://downloads.php.net/~windows/releases/archives/php-8.3.35-Win32-vs16-x64.zip"));
+        assert_eq!(archive_url("https://windows.php.net/downloads/releases/php-8.3.35-Win32-vs16-x64.zip").as_deref(), Some("https://windows.php.net/downloads/releases/archives/php-8.3.35-Win32-vs16-x64.zip"));
+        assert_eq!(archive_url("https://windows.php.net/downloads/releases/archives/php-8.3.35-Win32-vs16-x64.zip"), None, "already there");
+        assert_eq!(archive_url("https://archive.mariadb.org/mariadb-10.11.19/winx64-packages/x.zip"), None, "other publishers keep their old files");
+        let php = comp("php");
+        assert!(php.url.starts_with("https://windows.php.net/downloads/releases/php-"), "the manifest points at the current release, not a staging path: {}", php.url);
+    }
+
+    /// The exact link that used to 404 (a release that has since moved to /archives/) still installs: real download of PHP.
+    #[test]
+    #[ignore]
+    fn a_dead_pinned_php_link_still_installs() {
+        let root = std::env::temp_dir().join("rt-dead-link");
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        let mut c = comp("php");
+        c.version = "8.3.35".into();
+        c.url = "https://downloads.php.net/~windows/releases/php-8.3.35-Win32-vs16-x64.zip".into();
+        c.sha256 = "b454bed828a74536125d8a96119eae8ffbb186b305759dd6cf8d9bb4b55968b1".into();
+        assert!(ureq::get(&c.url).call().is_err(), "this address is expected to be dead; if it works again the test is moot");
+        install(&c, &root).unwrap();
+        assert!(root.join("php/php.exe").exists() && root.join("php/php.ini").exists());
+        assert_eq!(read_marker(&root.join("php")).as_deref(), Some("8.3.35"));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn registry_text_values_round_trip_in_a_throwaway_key() {
+        // never the real Run key: a scratch key under HKCU that is emptied again
+        let key = r"Software\RunqoraUnitTest";
+        assert_eq!(win::reg_get_string(key, "v"), None);
+        win::reg_set_string(key, "v", r#""C:\Program Files\Runqora\runqora.exe" --hidden"#).unwrap();
+        assert_eq!(win::reg_get_string(key, "v").as_deref(), Some(r#""C:\Program Files\Runqora\runqora.exe" --hidden"#));
+        win::reg_delete(key, "v");
+        assert_eq!(win::reg_get_string(key, "v"), None);
+        // the sign-in setting is read from the real Run key but is off unless it names Runqora
+        let _ = launch_at_login();
     }
 
     #[test]

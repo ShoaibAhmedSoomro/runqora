@@ -371,3 +371,37 @@ fn live_publishers_still_parse() {
         }
     }
 }
+
+#[test]
+fn a_candidate_becomes_an_installable_component_with_the_right_checksum_kind() {
+    let base = component("php").unwrap();
+    let mk = |sha: &str| Candidate { version: "8.3.99".into(), kind: "patch", line: "8.3".into(), url: "https://windows.php.net/x.zip".into(), sha256: sha.into(), strip_prefix: "p/".into(), notes_url: String::new(), warnings: vec![] };
+    let a = with_candidate(&base, &mk(&"ab".repeat(32)));
+    assert_eq!((a.version.as_str(), a.url.as_str(), a.strip_prefix.as_str(), a.sha256.len(), a.sha512.len(), a.sha1.len()), ("8.3.99", "https://windows.php.net/x.zip", "p/", 64, 0, 0));
+    let b = with_candidate(&base, &mk(&format!("sha512:{}", "cd".repeat(64))));
+    assert_eq!((b.sha256.len(), b.sha512.len()), (0, 128), "the old SHA-256 must not linger next to a SHA-512");
+    let c = with_candidate(&base, &mk(&format!("sha1:{}", "ef".repeat(20))));
+    assert_eq!((c.sha256.len(), c.sha1.len()), (0, 40));
+    crate::validate(&a).unwrap();
+    crate::validate(&b).unwrap();
+    assert_eq!((a.binary.as_str(), a.id.as_str()), (base.binary.as_str(), "php"), "everything else is unchanged");
+}
+
+/// For every module, what the publisher offers today can be turned into something installable (needs the internet).
+#[test]
+#[ignore]
+fn every_module_can_be_resolved_to_a_current_download() {
+    for id in ["php", "apache", "mariadb", "phpmyadmin", "jre", "tomcat", "mailpit", "sftpgo", "wordpress", "node", "composer", "adminer"] {
+        let mut c = component(id).unwrap();
+        // pretend the manifest is one patch behind so the publisher has something "newer" to give
+        let v = parse_ver(&c.version);
+        c.version = format!("{}.{}.0", v.first().unwrap_or(&0), v.get(1).unwrap_or(&0));
+        if id == "jre" { c.version = "21.0.1".into() }
+        if let Ok(live) = installable_now(&c) {
+            assert!(host_allowed(&live.url, HOSTS), "{id}: {}", live.url);
+            crate::validate(&live).unwrap_or_else(|e| panic!("{id}: {e}"));
+        } else {
+            println!("{id}: nothing newer than {} offered (fine for single releases)", c.version);
+        }
+    }
+}

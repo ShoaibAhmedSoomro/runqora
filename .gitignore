@@ -1,0 +1,16 @@
+# build output and generated files
+target/
+app/src-tauri/target/
+app/src-tauri/gen/
+app/src-tauri/resources/
+*.zip
+*.part
+# local test installs and scratch
+rt-*/
+.claude/
+node_modules/
+Thumbs.db
+
+# local design notes and logo explorations (not part of the app)
+replica/
+logos/

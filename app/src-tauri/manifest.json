@@ -1,0 +1,155 @@
+{
+  "schema": 1,
+  "components": [
+    {
+      "id": "apache",
+      "name": "Apache HTTP Server",
+      "version": "2.4.66",
+      "url": "https://www.apachelounge.com/download/VS17/binaries/httpd-2.4.66-251206-Win64-VS17.zip",
+      "sha256": "2cd1f349b6705e43e784e876a233eeb1a859fa6b8abc693a91f87b35a368f7f9",
+      "strip_prefix": "Apache24/",
+      "extract_to": "apache",
+      "binary": "apache/bin/httpd.exe",
+      "args": ["-d", "{root}/apache"],
+      "pidfile": "apache/logs/httpd.pid",
+      "shutdown_event": "ap{pid}_shutdown",
+      "port": 80,
+      "admin_url": "http://localhost:{port}/",
+      "configs": ["apache/conf/httpd.conf", "apache/conf/extra/runqora.conf"],
+      "logs": ["apache/logs/error_log", "apache/logs/access_log"],
+      "service": {
+        "name": "RunqoraApache",
+        "install": ["-d", "{root}/apache", "-k", "install", "-n", "{service}"],
+        "remove": ["-k", "uninstall", "-n", "{service}"]
+      }
+    },
+    {
+      "id": "php",
+      "name": "PHP (thread safe)",
+      "version": "8.3.35",
+      "url": "https://downloads.php.net/~windows/releases/php-8.3.35-Win32-vs16-x64.zip",
+      "sha256": "b454bed828a74536125d8a96119eae8ffbb186b305759dd6cf8d9bb4b55968b1",
+      "strip_prefix": "",
+      "extract_to": "php",
+      "binary": "php/php.exe",
+      "configs": ["php/php.ini"]
+    },
+    {
+      "id": "mariadb",
+      "name": "MariaDB",
+      "version": "10.11.19",
+      "url": "https://archive.mariadb.org/mariadb-10.11.19/winx64-packages/mariadb-10.11.19-winx64.zip",
+      "sha256": "398ea30e5036010bbebe01d2b1804280424dcc2626e36d8e95155c04d25a0490",
+      "strip_prefix": "mariadb-10.11.19-winx64/",
+      "extract_to": "mariadb",
+      "binary": "mariadb/bin/mysqld.exe",
+      "args": ["--defaults-file={root}/mariadb/my.ini", "--standalone"],
+      "pidfile": "mariadb/data/mysql.pid",
+      "shutdown_event": "MySQLShutdown{pid}",
+      "port": 3306,
+      "admin_url": "http://localhost:{apache_port}/phpmyadmin/",
+      "configs": ["mariadb/my.ini"],
+      "logs": ["mariadb/data/mysql_error.log"],
+      "service": {
+        "name": "RunqoraMariaDB",
+        "install": ["--install", "{service}", "--defaults-file={root}/mariadb/my.ini"],
+        "remove": ["--remove", "{service}"]
+      }
+    },
+    {
+      "id": "phpmyadmin",
+      "name": "phpMyAdmin",
+      "version": "5.2.3",
+      "url": "https://files.phpmyadmin.net/phpMyAdmin/5.2.3/phpMyAdmin-5.2.3-all-languages.zip",
+      "sha256": "2d2e13c735366d318425c78e4ee2cc8fc648d77faba3ddea2cd516e43885733f",
+      "strip_prefix": "phpMyAdmin-5.2.3-all-languages/",
+      "extract_to": "phpmyadmin",
+      "binary": "phpmyadmin/index.php",
+      "configs": ["phpmyadmin/config.inc.php"]
+    },
+    {
+      "id": "jre",
+      "name": "Java runtime (Temurin 21)",
+      "version": "21.0.12.1",
+      "url": "https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.12.1%2B1/OpenJDK21U-jre_x64_windows_hotspot_21.0.12.1_1.zip",
+      "sha256": "d35f31e712f0fcf6ac5a093edc90204fbff22f720ba3950bd09d331d5e621636",
+      "strip_prefix": "*",
+      "extract_to": "jre",
+      "binary": "jre/bin/java.exe"
+    },
+    {
+      "id": "tomcat",
+      "name": "Apache Tomcat",
+      "version": "10.1.61",
+      "url": "https://archive.apache.org/dist/tomcat/tomcat-10/v10.1.61/bin/apache-tomcat-10.1.61-windows-x64.zip",
+      "sha512": "33831f4200eda8638bbf9794a99c4666a144e3b66c87933e57ef53ab7cf23e75bc0e71ae2ddd338c838c674b94d8e673179e5015a0c5500f90f2e992820b52f5",
+      "strip_prefix": "apache-tomcat-10.1.61/",
+      "extract_to": "tomcat",
+      "binary": "tomcat/bin/bootstrap.jar",
+      "exe": "jre/bin/java.exe",
+      "needs": ["jre"],
+      "args": [
+        "-Dcatalina.home={root}/tomcat", "-Dcatalina.base={root}/tomcat", "-Djava.io.tmpdir={root}/tomcat/temp", "-Dfile.encoding=UTF-8",
+        "-Djava.util.logging.config.file={root}/tomcat/conf/logging.properties", "-Djava.util.logging.manager=org.apache.juli.ClassLoaderLogManager",
+        "--add-opens=java.base/java.lang=ALL-UNNAMED", "--add-opens=java.base/java.io=ALL-UNNAMED", "--add-opens=java.base/java.util=ALL-UNNAMED",
+        "--add-opens=java.base/java.util.concurrent=ALL-UNNAMED", "--add-opens=java.rmi/sun.rmi.transport=ALL-UNNAMED",
+        "-classpath", "{root}/tomcat/bin/bootstrap.jar;{root}/tomcat/bin/tomcat-juli.jar", "org.apache.catalina.startup.Bootstrap", "start"
+      ],
+      "write_pid": true,
+      "pidfile": "tomcat/temp/runqora.pid",
+      "shutdown_port": 8005,
+      "shutdown_text": "SHUTDOWN",
+      "port": 8080,
+      "admin_url": "http://localhost:{port}/",
+      "configs": ["tomcat/conf/server.xml", "tomcat/conf/tomcat-users.xml"]
+    },
+    {
+      "id": "mailpit",
+      "name": "Mailpit (mail catcher)",
+      "version": "1.31.6",
+      "url": "https://github.com/axllent/mailpit/releases/download/v1.31.6/mailpit-windows-amd64.zip",
+      "sha256": "5d5ad094bfb3bac9004f9d1105d2335fea9f8952c09951df73ae0a280e34d3b1",
+      "strip_prefix": "",
+      "extract_to": "mailpit",
+      "binary": "mailpit/mailpit.exe",
+      "args": ["--listen", "127.0.0.1:{port}", "--smtp", "127.0.0.1:1025", "--database", "{root}/mailpit/mailpit.db"],
+      "write_pid": true,
+      "pidfile": "mailpit/mailpit.pid",
+      "port": 8025,
+      "admin_url": "http://localhost:{port}/"
+    },
+    {
+      "id": "sftpgo",
+      "name": "SFTPGo (FTP and SFTP)",
+      "version": "2.7.6",
+      "url": "https://github.com/drakkan/sftpgo/releases/download/v2.7.6/sftpgo_v2.7.6_windows_portable.zip",
+      "sha256": "af3994bb690962c7575858aee368a4c1d6fd4748b35770bb0773eb06408d504d",
+      "strip_prefix": "*",
+      "extract_to": "sftpgo",
+      "binary": "sftpgo/sftpgo.exe",
+      "args": ["serve", "--config-dir", "{root}/sftpgo"],
+      "env": {
+        "SFTPGO_HTTPD__BINDINGS__0__PORT": "{port}",
+        "SFTPGO_HTTPD__BINDINGS__0__ADDRESS": "127.0.0.1",
+        "SFTPGO_FTPD__BINDINGS__0__PORT": "21",
+        "SFTPGO_FTPD__BINDINGS__0__ADDRESS": "127.0.0.1",
+        "SFTPGO_SFTPD__BINDINGS__0__PORT": "2022",
+        "SFTPGO_SFTPD__BINDINGS__0__ADDRESS": "127.0.0.1"
+      },
+      "write_pid": true,
+      "pidfile": "sftpgo/sftpgo.pid",
+      "port": 8082,
+      "admin_url": "http://localhost:{port}/web/admin"
+    },
+    {
+      "id": "wordpress",
+      "name": "WordPress",
+      "version": "7.1.3",
+      "url": "https://downloads.wordpress.org/release/wordpress-7.1.3.zip",
+      "sha1": "13eb1d042b1ca39224e44906cd84fe203112210c",
+      "strip_prefix": "wordpress/",
+      "extract_to": "wordpress",
+      "binary": "wordpress/wp-load.php"
+    }
+  ]
+}

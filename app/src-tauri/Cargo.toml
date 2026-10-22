@@ -1,0 +1,20 @@
+[package]
+name = "runqora"
+version = "0.1.0"
+edition = "2021"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon", "image-ico"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+ureq = "2"
+zip = { version = "2", default-features = false, features = ["deflate"] }
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_System_Threading", "Win32_Security_Cryptography", "Win32_NetworkManagement_IpHelper", "Win32_Networking_WinSock", "Win32_System_Services", "Win32_UI_Shell", "Win32_System_Registry", "Win32_System_Diagnostics_ToolHelp", "Win32_System_Console"] }
+
+# deps run unoptimised in debug otherwise: unzipping 90 MB takes minutes
+[profile.dev.package."*"]
+opt-level = 3

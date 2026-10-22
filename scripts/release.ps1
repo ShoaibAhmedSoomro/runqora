@@ -34,9 +34,12 @@ $ErrorActionPreference = "Stop"
 if ($exists) { throw "Release v$Version already exists." }
 
 # 1. version
-(Get-Content "$tauri\Cargo.toml" -Raw) -replace '(?m)^version = ".+"', "version = `"$Version`"" | Set-Content "$tauri\Cargo.toml" -NoNewline -Encoding utf8
-$conf = Get-Content "$tauri\tauri.conf.json" -Raw
-($conf -replace '"version":\s*"[^"]+"', "`"version`": `"$Version`"") | Set-Content "$tauri\tauri.conf.json" -NoNewline -Encoding utf8
+# no byte-order mark: Windows PowerShell 5.1's "-Encoding utf8" adds one, and Tauri cannot read JSON that starts with it
+$utf8 = New-Object System.Text.UTF8Encoding($false)
+$cargo = [IO.File]::ReadAllText("$tauri\Cargo.toml")
+[IO.File]::WriteAllText("$tauri\Cargo.toml", ($cargo -replace '(?m)^version = ".+"', "version = `"$Version`""), $utf8)
+$conf = [IO.File]::ReadAllText("$tauri\tauri.conf.json")
+[IO.File]::WriteAllText("$tauri\tauri.conf.json", ($conf -replace '"version":\s*"[^"]+"', "`"version`": `"$Version`""), $utf8)
 
 # 2. build
 Push-Location $tauri

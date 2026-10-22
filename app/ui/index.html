@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Runqora</title>
+<link rel="stylesheet" href="tokens.css">
+<link rel="stylesheet" href="app.css">
+<link rel="stylesheet" href="effects.css">
+</head>
+<body>
+<div class="app">
+  <nav class="nav" aria-label="Main">
+    <div class="nav-brand"><img class="logo-img" src="logos/runqora.svg" alt=""><span class="nav-text">Runqora</span></div>
+    <button class="nav-item" data-page="modules" aria-current="page"><i class="icon" aria-hidden="true">&#xE80F;</i><span class="nav-text">Modules</span></button>
+    <button class="nav-item" data-page="sites"><i class="icon" aria-hidden="true">&#xE12B;</i><span class="nav-text">Sites</span></button>
+    <button class="nav-item" data-page="updates"><i class="icon" aria-hidden="true">&#xE895;</i><span class="nav-text">Updates</span><span class="count info" id="updcount" hidden></span></button>
+    <button class="nav-item" data-page="ports"><i class="icon" aria-hidden="true">&#xE774;</i><span class="nav-text">Ports</span></button>
+    <button class="nav-item" data-page="activity"><i class="icon" aria-hidden="true">&#xE7C3;</i><span class="nav-text">Activity</span><span class="count" id="errcount" hidden></span></button>
+    <div class="nav-spacer"></div>
+    <button class="nav-item" data-page="settings"><i class="icon" aria-hidden="true">&#xE713;</i><span class="nav-text">Settings</span></button>
+    <button class="nav-item" data-page="about"><i class="icon" aria-hidden="true">&#xE946;</i><span class="nav-text">About</span></button>
+  </nav>
+
+  <main class="content">
+    <div id="infobars" class="infobars" aria-live="polite"></div>
+
+    <section class="page" id="page-modules">
+      <header class="page-header">
+        <div><h1>Modules</h1><p class="muted">Start, stop and configure your local web stack.</p></div>
+        <div class="command-bar">
+          <button class="btn" id="check-setup"><i class="icon" aria-hidden="true">&#xE90F;</i><span id="setup-label">Check setup</span></button>
+          <button class="btn" id="start-all"><i class="icon" aria-hidden="true">&#xE768;</i>Start all</button>
+          <button class="btn" id="stop-all"><i class="icon" aria-hidden="true">&#xE71A;</i>Stop all</button>
+        </div>
+      </header>
+      <div id="modules" class="stack"></div>
+      <div id="externals" class="stack"></div>
+    </section>
+
+    <section class="page" id="page-sites" hidden>
+      <header class="page-header">
+        <div><h1>Sites</h1><p class="muted">Each site opens at its own address, like shop.localhost. No hosts file to edit.</p></div>
+        <div class="command-bar">
+          <button class="btn" id="site-wp"><i class="icon" aria-hidden="true">&#xE710;</i>New WordPress site</button>
+          <button class="btn accent" id="site-new"><i class="icon" aria-hidden="true">&#xE710;</i>New site</button>
+        </div>
+      </header>
+      <div id="sites" class="stack"></div>
+    </section>
+
+    <section class="page" id="page-updates" hidden>
+      <header class="page-header">
+        <div><h1>Updates</h1><p class="muted" id="upd-meta">Not checked yet.</p></div>
+        <div class="command-bar">
+          <button class="btn" id="upd-all"><i class="icon" aria-hidden="true">&#xE896;</i>Update all</button>
+          <button class="btn accent" id="upd-check"><i class="icon" aria-hidden="true">&#xE895;</i>Check for updates</button>
+        </div>
+      </header>
+      <div id="updates" class="stack"></div>
+    </section>
+
+    <section class="page" id="page-ports" hidden>
+      <header class="page-header">
+        <div><h1>Ports</h1><p class="muted">Programs listening for connections on this PC.</p></div>
+        <div class="command-bar">
+          <label class="search"><i class="icon" aria-hidden="true">&#xE721;</i><input id="ports-filter" type="search" placeholder="Filter by port or program" aria-label="Filter ports"></label>
+          <button class="btn" id="ports-refresh"><i class="icon" aria-hidden="true">&#xE72C;</i>Refresh</button>
+        </div>
+      </header>
+      <div id="ports" class="card table-wrap"></div>
+    </section>
+
+    <section class="page" id="page-activity" hidden>
+      <header class="page-header">
+        <div><h1>Activity</h1><p class="muted">What Runqora did, newest at the bottom.</p></div>
+        <div class="command-bar">
+          <button class="btn" id="log-copy"><i class="icon" aria-hidden="true">&#xE8C8;</i>Copy</button>
+          <button class="btn" id="log-clear"><i class="icon" aria-hidden="true">&#xE74D;</i>Clear</button>
+        </div>
+      </header>
+      <div id="log" class="log card" role="log" tabindex="0" aria-label="Activity"></div>
+    </section>
+
+    <section class="page" id="page-settings" hidden>
+      <header class="page-header"><div><h1>Settings</h1><p class="muted">Changes save as you make them and are written into the right files for you.</p></div></header>
+      <div class="stack" id="settings"></div>
+    </section>
+
+    <section class="page" id="page-about" hidden>
+      <header class="page-header"><div><h1>About</h1><p class="muted">Where things live on this PC.</p></div></header>
+      <div class="stack" id="about"></div>
+    </section>
+  </main>
+</div>
+<script src="mock.js"></script>
+<script type="module" src="app.js"></script>
+</body>
+</html>

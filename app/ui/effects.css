@@ -1,0 +1,90 @@
+/* Materials and motion. app.css holds the components; this file holds how they feel.
+   Everything here is decoration: remove the file and the app still works. */
+
+/* ---- logos ---- */
+.logo-img { width: 20px; height: 20px; flex: none; border-radius: 5px; }
+.logo-mark { display: inline-block; flex: none; width: var(--size, 24px); height: var(--size, 24px); background: var(--brand, var(--color-accent)); -webkit-mask: center / contain no-repeat; mask: center / contain no-repeat; transition: transform var(--motion-base) var(--motion-ease); }
+.logo-mark.fallback { -webkit-mask: none; mask: none; background: none; display: grid; place-items: center; font-weight: 600; color: var(--color-accent-text); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .logo-mark { background: var(--brand-dark, var(--brand)); } }
+:root[data-theme="dark"] .logo-mark { background: var(--brand-dark, var(--brand)); }
+.card:hover .tile .logo-mark { transform: scale(1.1); }
+.tag .logo-mark { width: 12px; height: 12px; margin-right: 4px; vertical-align: -1px; background: currentColor; }
+.with-logo { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.hero { display: flex; align-items: center; gap: 16px; padding: 20px 16px; }
+.app-logo { width: 48px; height: 48px; border-radius: 12px; box-shadow: 0 2px 8px rgb(0 0 0 / .18); }
+.big { font-size: 20px; line-height: 28px; }
+.fine { max-width: 62ch; padding: 4px 4px 0; }
+
+/* ---- controls added with the updater ---- */
+select { height: 32px; padding: 0 28px 0 10px; border: 1px solid var(--color-border); border-bottom-color: var(--color-border-input); border-radius: var(--radius-sm); background: var(--color-surface); color: var(--color-text); font: inherit; cursor: pointer; }
+select:focus-visible { outline: 2px solid var(--color-text); outline-offset: 1px; }
+.count.info { background: var(--color-accent); color: var(--color-on-accent); }
+.status.avail .dot { background: var(--color-accent); }
+.status.avail .dot, .running .dot { animation: pulse 2.4s var(--motion-ease) infinite; }
+
+/* ---- dialog (Fluent ContentDialog on <dialog>) ---- */
+.dialog { width: min(520px, calc(100vw - 32px)); max-height: calc(100vh - 48px); padding: 0; border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-surface); color: var(--color-text); box-shadow: var(--shadow-flyout); overflow: hidden; }
+.dialog[open] { display: flex; flex-direction: column; animation: dialogIn 200ms var(--motion-ease); }
+.dialog::backdrop { background: rgb(0 0 0 / .35); backdrop-filter: blur(3px); animation: fade 200ms var(--motion-ease); }
+.dialog h2 { margin: 0; padding: 24px 24px 8px; font: var(--weight-lg) var(--text-lg) var(--font-display); }
+.dialog-body { padding: 0 24px 20px; display: grid; gap: 12px; overflow-y: auto; user-select: text; }
+.dialog-body p { margin: 0; }
+.dialog-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 20px 24px 24px; background: var(--color-surface-alt); border-top: 1px solid var(--color-border); }
+
+/* ---- skeleton loading ---- */
+.skeleton { display: flex; align-items: center; gap: 16px; min-height: 68px; padding: 12px 16px; pointer-events: none; }
+.sk-tile { width: 40px; height: 40px; border-radius: var(--radius-md); flex: none; }
+.sk-lines { flex: 1; display: grid; gap: 8px; }
+.sk-line { height: 10px; border-radius: 5px; }
+.w60 { width: 60%; } .w30 { width: 30%; }
+.sk-tile, .sk-line { background: linear-gradient(100deg, var(--color-border) 30%, color-mix(in srgb, var(--color-border) 40%, var(--color-surface)) 50%, var(--color-border) 70%); background-size: 250% 100%; animation: shimmer 1.4s linear infinite; }
+
+/* ---- motion ---- */
+.page:not([hidden]) { animation: pageIn 240ms var(--motion-ease); }
+.card.enter { animation: cardIn 320ms var(--motion-ease) both; animation-delay: calc(var(--i, 0) * 45ms); }
+.infobar { animation: slideIn 260ms var(--motion-ease); }
+.nav-item[aria-current="page"]::before { animation: grow 260ms var(--motion-ease); }
+.btn:active:not(:disabled) { transform: scale(.97); }
+.switch:active:not(:disabled) .thumb { width: 16px; }
+.switch[aria-checked="true"]:active:not(:disabled) .thumb { left: 18px; }
+.nav-item:active { transform: scale(.98); }
+@keyframes pageIn { from { opacity: 0; transform: translateY(10px); } }
+@keyframes cardIn { from { opacity: 0; transform: translateY(14px) scale(.985); } }
+@keyframes slideIn { from { opacity: 0; transform: translateX(24px); } }
+@keyframes grow { from { transform: scaleY(.2); } }
+@keyframes dialogIn { from { opacity: 0; transform: scale(.94); } }
+@keyframes fade { from { opacity: 0; } }
+@keyframes shimmer { to { background-position: -150% 0; } }
+@keyframes pulse { 0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, currentColor 0%, transparent); } 50% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--color-success) 22%, transparent); } }
+.status.avail .dot { --pulse: var(--color-accent); }
+
+/* Fluent "reveal": light that follows the pointer (position is set from script) */
+.card { position: relative; }
+.card::before { content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none; opacity: 0; transition: opacity var(--motion-base); background: radial-gradient(260px circle at var(--mx, 50%) var(--my, 50%), color-mix(in srgb, var(--color-text) 6%, transparent), transparent 70%); }
+.card:hover::before { opacity: 1; }
+.skeleton::before { display: none; }
+
+/* ---- Mica: the core turns the window material on, then <html class="fx"> makes surfaces translucent ---- */
+.fx body, .fx { background: transparent; }
+.fx .content { background: color-mix(in srgb, var(--color-layer) 58%, transparent); border-color: color-mix(in srgb, var(--color-border) 80%, transparent); }
+.fx .card { background: color-mix(in srgb, var(--color-surface) 72%, transparent); border-color: color-mix(in srgb, var(--color-border) 85%, transparent); }
+.fx .module-body { background: color-mix(in srgb, var(--color-surface-alt) 60%, transparent); }
+.fx th { background: color-mix(in srgb, var(--color-surface) 88%, transparent); backdrop-filter: blur(12px); }
+.fx .btn { background: color-mix(in srgb, var(--color-surface) 78%, transparent); }
+.fx .btn.accent { background: var(--color-accent); }
+.fx .btn.ghost { background: transparent; }
+.fx .tile { background: color-mix(in srgb, var(--color-surface-alt) 70%, transparent); }
+.fx .dialog-actions { background: color-mix(in srgb, var(--color-surface-alt) 70%, transparent); }
+/* Acrylic: notifications and dialogs blur what is behind them */
+.fx .infobars .infobar { background: color-mix(in srgb, var(--color-surface) 78%, transparent); backdrop-filter: blur(24px) saturate(1.6); }
+.fx .infobars .infobar.success { background: color-mix(in srgb, var(--color-success-bg) 82%, transparent); }
+.fx .infobars .infobar.warning { background: color-mix(in srgb, var(--color-warning-bg) 82%, transparent); }
+.fx .infobars .infobar.error { background: color-mix(in srgb, var(--color-danger-bg) 82%, transparent); }
+.fx .dialog { background: color-mix(in srgb, var(--color-surface) 82%, transparent); backdrop-filter: blur(30px) saturate(1.5); }
+
+/* ---- respect the system setting ---- */
+@media (prefers-reduced-motion: reduce) {
+  .page, .card.enter, .infobar, .dialog[open], .dialog::backdrop, .nav-item::before, .dot, .sk-tile, .sk-line { animation: none !important; }
+  .card.enter { opacity: 1; }
+}
+@media (forced-colors: active) { .logo-mark { background: CanvasText; } .card::before { display: none; } }

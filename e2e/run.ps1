@@ -155,6 +155,12 @@ if ($Network) {
   Check "UPD-N2" "an update for an unknown module exits 2" { Rq update nginx | Out-Null; (Code) -eq 2 }
   Check "UPD-N3" "rollback with nothing to roll back to exits 1" { Rq rollback apache | Out-Null; (Code) -eq 1 }
   Check "UPD-N4" "an update is refused while the server runs" { Rq start apache | Out-Null; $o = Rq update php 9.9.9; $r = (Code) -ne 0; Rq stop | Out-Null; $r }
+  Check "UPD-N5" "every module's publisher is read and offers a version with a checksum (nothing is downloaded)" {
+    $ok = $true; foreach ($m in @("jre:21.0.1", "tomcat:10.1.1", "mailpit:1.0.0", "sftpgo:2.0.0", "wordpress:6.0.0", "node:20.0.0", "composer:2.0.0", "adminer:4.0.0", "php:8.3.1", "mariadb:10.11.1", "apache:2.4.1", "phpmyadmin:5.0.0")) {
+      $id, $v = $m.Split(":"); $o = Rq updates --probe $id $v; if ((Code) -ne 0 -or $o -notmatch "(sha(1|512):)?[0-9a-f]{40,}") { Write-Host "    probe $id -> $o"; $ok = $false } }
+    $ok }
+  Check "UPD-N6" "the newest Runqora release is found and compared with this build" { $o = Rq app-update; (Code) -eq 0 -and $o -match "Runqora" }
+  Check "UPD-N7" "probing an unknown module fails cleanly" { Rq updates --probe nope | Out-Null; (Code) -eq 1 }
 } else { Skip "UPD-*" "network checks off (pass -Network)" }
 
 Write-Host "`nSites, HTTPS and the newer modules"

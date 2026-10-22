@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img"><title>Runqora</title>
+<defs>
+<linearGradient id="a" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#2f80ff"/><stop offset="1" stop-color="#2fd0e8"/></linearGradient>
+<linearGradient id="b" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#7c5cff"/><stop offset="1" stop-color="#d26bff"/></linearGradient>
+<linearGradient id="c" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ff4f7b"/><stop offset="1" stop-color="#ffb13c"/></linearGradient>
+</defs>
+<g id="icon" fill="none" stroke-width="64" stroke-linecap="round" stroke-linejoin="round">
+<path d="M90 120L200 256L90 392" stroke="url(#a)"/>
+<path d="M205 120L315 256L205 392" stroke="url(#b)" opacity=".95"/>
+<path d="M320 120L430 256L320 392" stroke="url(#c)" opacity=".95"/>
+</g></svg>

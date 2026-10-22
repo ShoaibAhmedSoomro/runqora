@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Runqora - local web stack for Windows</title>
+<meta name="description" content="Install and run Apache, PHP, MariaDB, phpMyAdmin and more on Windows from one clean window. Sites, HTTPS, updates and a command line.">
+<link rel="icon" href="img/logo.svg" type="image/svg+xml">
+<meta property="og:title" content="Runqora">
+<meta property="og:description" content="A local web stack for Windows: Apache, PHP, MariaDB and more in one clean window.">
+<meta property="og:image" content="https://shoaibahmedsoomro.github.io/runqora/img/modules-dark.png">
+<style>
+:root {
+  --bg: #f6f7fb; --surface: #ffffff; --text: #14171f; --muted: #566074; --border: #e1e5ee;
+  --accent: #2563eb; --on-accent: #ffffff; --shadow: 0 20px 60px -20px rgb(30 40 90 / .35);
+  --glow-a: #2f80ff33; --glow-b: #d26bff2e; --glow-c: #ffb13c2e;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f1117; --surface: #181b24; --text: #f2f4f9; --muted: #9aa4b8; --border: #2a2f3d;
+    --accent: #5b9bff; --on-accent: #08111f; --shadow: 0 20px 60px -20px rgb(0 0 0 / .8);
+    --glow-a: #2f80ff40; --glow-b: #d26bff33; --glow-c: #ffb13c26;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0f1117; --surface: #181b24; --text: #f2f4f9; --muted: #9aa4b8; --border: #2a2f3d;
+  --accent: #5b9bff; --on-accent: #08111f; --shadow: 0 20px 60px -20px rgb(0 0 0 / .8);
+  --glow-a: #2f80ff40; --glow-b: #d26bff33; --glow-c: #ffb13c26;
+}
+* { box-sizing: border-box; margin: 0; }
+html { scroll-behavior: smooth; }
+body { font: 16px/1.6 "Segoe UI Variable", "Segoe UI", system-ui, -apple-system, sans-serif; background: var(--bg); color: var(--text); }
+a { color: inherit; }
+.wrap { width: min(1120px, 100% - 32px); margin-inline: auto; }
+header.top { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 20px 0; }
+.brand { display: flex; align-items: center; gap: 10px; font-weight: 650; font-size: 18px; text-decoration: none; }
+.brand img { width: 30px; height: 30px; }
+nav.links { display: flex; align-items: center; gap: 20px; font-size: 15px; color: var(--muted); }
+nav.links a { text-decoration: none; }
+nav.links a:hover { color: var(--text); }
+.hero { position: relative; text-align: center; padding: 56px 0 24px; isolation: isolate; }
+.hero::before { content: ""; position: absolute; inset: -80px 0 auto; height: 520px; z-index: -1;
+  background: radial-gradient(40% 60% at 25% 40%, var(--glow-a), transparent 70%), radial-gradient(35% 55% at 75% 30%, var(--glow-b), transparent 70%), radial-gradient(30% 50% at 55% 75%, var(--glow-c), transparent 70%); }
+.hero img.mark { width: 92px; height: 92px; }
+h1 { font-size: clamp(34px, 6vw, 60px); line-height: 1.08; letter-spacing: -.02em; margin: 18px auto 14px; max-width: 16ch; }
+.lead { font-size: clamp(17px, 2.2vw, 20px); color: var(--muted); max-width: 54ch; margin: 0 auto 28px; }
+.cta { display: flex; flex-wrap: wrap; gap: 12px; justify-content: center; }
+.btn { display: inline-flex; align-items: center; gap: 10px; padding: 13px 22px; border-radius: 10px; font-weight: 600; text-decoration: none; border: 1px solid var(--border); background: var(--surface); }
+.btn.primary { background: linear-gradient(135deg, #2f80ff, #7c5cff 55%, #d26bff); color: #fff; border-color: transparent; box-shadow: 0 10px 30px -10px #7c5cffaa; }
+.btn:hover { transform: translateY(-1px); }
+.btn:focus-visible, a:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
+.fine { color: var(--muted); font-size: 14px; margin-top: 14px; }
+.shot { margin: 48px auto 0; width: min(1000px, 100%); border-radius: 14px; border: 1px solid var(--border); box-shadow: var(--shadow); overflow: hidden; background: var(--surface); }
+.shot img { display: block; width: 100%; height: auto; }
+section { padding: 72px 0 0; }
+h2 { font-size: clamp(26px, 4vw, 36px); letter-spacing: -.01em; margin-bottom: 8px; }
+.sub { color: var(--muted); margin-bottom: 32px; max-width: 60ch; }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 22px; }
+.card h3 { font-size: 18px; margin-bottom: 6px; display: flex; align-items: center; gap: 10px; }
+.card h3 i { width: 10px; height: 10px; border-radius: 50%; flex: none; background: var(--c, var(--accent)); }
+.card p { color: var(--muted); font-size: 15px; }
+.pair { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; margin-top: 16px; }
+.pair figure { border: 1px solid var(--border); border-radius: 14px; overflow: hidden; background: var(--surface); }
+.pair img { display: block; width: 100%; height: auto; }
+.pair figcaption { padding: 10px 16px; font-size: 14px; color: var(--muted); border-top: 1px solid var(--border); }
+ol.steps { list-style: none; padding: 0; display: grid; gap: 14px; counter-reset: s; max-width: 760px; }
+ol.steps li { counter-increment: s; position: relative; padding: 4px 0 4px 52px; }
+ol.steps li::before { content: counter(s); position: absolute; left: 0; top: 0; width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center; font-weight: 700; color: #fff; background: linear-gradient(135deg, #2f80ff, #d26bff); }
+ol.steps b { display: block; }
+ol.steps span { color: var(--muted); font-size: 15px; }
+code { font: 14px/1.4 Consolas, "Cascadia Mono", monospace; background: var(--surface); border: 1px solid var(--border); padding: 2px 6px; border-radius: 6px; }
+.cta-band { margin-top: 72px; text-align: center; padding: 48px 20px; border-radius: 20px; border: 1px solid var(--border); background: var(--surface); position: relative; overflow: hidden; isolation: isolate; }
+.cta-band::before { content: ""; position: absolute; inset: 0; z-index: -1; background: radial-gradient(50% 90% at 20% 0%, var(--glow-a), transparent 70%), radial-gradient(50% 90% at 85% 100%, var(--glow-b), transparent 70%); }
+footer { margin-top: 72px; padding: 28px 0 48px; border-top: 1px solid var(--border); display: flex; flex-wrap: wrap; gap: 16px 32px; justify-content: space-between; color: var(--muted); font-size: 14px; }
+footer .social { display: flex; gap: 14px; flex-wrap: wrap; }
+footer a { text-decoration: none; }
+footer a:hover { color: var(--text); text-decoration: underline; }
+@media (max-width: 560px) { nav.links a.hide-sm { display: none; } .btn { width: 100%; justify-content: center; } }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } .btn:hover { transform: none; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <a class="brand" href="#"><img src="img/logo.svg" alt="">Runqora</a>
+    <nav class="links" aria-label="Main">
+      <a class="hide-sm" href="#features">Features</a>
+      <a class="hide-sm" href="#install">Install</a>
+      <a href="https://github.com/ShoaibAhmedSoomro/runqora">GitHub</a>
+    </nav>
+  </header>
+
+  <main>
+    <div class="hero">
+      <img class="mark" src="img/logo.svg" alt="Runqora logo">
+      <h1>Your local web stack, in one window.</h1>
+      <p class="lead">Install and run Apache, PHP, MariaDB, phpMyAdmin and more on Windows. Sites at <code>name.localhost</code>, local HTTPS, one-click WordPress and safe updates.</p>
+      <div class="cta">
+        <a class="btn primary" id="dl" href="https://github.com/ShoaibAhmedSoomro/runqora/releases/latest/download/Runqora-Setup-x64.exe">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m0 0l-5-5m5 5l5-5M4 20h16"/></svg>
+          Download for Windows
+        </a>
+        <a class="btn" href="https://github.com/ShoaibAhmedSoomro/runqora/releases">All releases</a>
+      </div>
+      <p class="fine">Windows 10 or 11, 64-bit · installs for your account only, no administrator rights · <span id="ver">free and open source</span></p>
+      <div class="shot"><img src="img/modules-dark.png" alt="The Runqora modules page showing Apache, PHP, MariaDB and phpMyAdmin"></div>
+    </div>
+
+    <section id="features">
+      <h2>Everything a local server needs</h2>
+      <p class="sub">The pieces you would otherwise download, unpack, edit and keep up to date by hand.</p>
+      <div class="grid">
+        <div class="card" style="--c:#2f80ff"><h3><i></i>One-click stack</h3><p>Apache, PHP, MariaDB and phpMyAdmin download from their publishers and are checked against the published checksum before anything is unpacked.</p></div>
+        <div class="card" style="--c:#7c5cff"><h3><i></i>Sites without hosts files</h3><p>Point any folder at <code>shop.localhost</code>. Runqora writes the virtual host and the certificate name for you.</p></div>
+        <div class="card" style="--c:#d26bff"><h3><i></i>One-click WordPress</h3><p>Copies WordPress, creates its database and writes <code>wp-config.php</code>. You finish in the browser.</p></div>
+        <div class="card" style="--c:#ff4f7b"><h3><i></i>Local HTTPS</h3><p>A private certificate authority for your own sites. Trusting it is a button you press, with Windows asking first.</p></div>
+        <div class="card" style="--c:#ff9a3c"><h3><i></i>Settings, not config files</h3><p>PHP limits and extensions, MariaDB tuning, ports and folders as forms. Export and import everything as a <code>runqora.ini</code>.</p></div>
+        <div class="card" style="--c:#ffb13c"><h3><i></i>Port conflicts fixed</h3><p>See which program holds a port, then end it, stop its service or move to a free port in one click.</p></div>
+        <div class="card" style="--c:#2fd0e8"><h3><i></i>Safe updates</h3><p>Patch updates can install themselves. Minor and major upgrades show their warnings first and can be rolled back.</p></div>
+        <div class="card" style="--c:#00c389"><h3><i></i>More servers</h3><p>Tomcat with its Java runtime, Mailpit to catch mail, SFTPGo for FTP and SFTP, and control of FileZilla Server or Mercury if you already have them.</p></div>
+        <div class="card" style="--c:#5b9bff"><h3><i></i>Windows 11 design</h3><p>Mica, light and dark themes that follow Windows, your accent colour, a tray icon and a layout that fits any window size.</p></div>
+        <div class="card" style="--c:#8a4dff"><h3><i></i>A real command line</h3><p><code>rq start</code>, <code>rq sites add</code>, <code>rq doctor --fix</code>: everything the window does, scriptable.</p></div>
+      </div>
+      <div class="pair">
+        <figure><img src="img/sites-dark.png" alt="Sites page" loading="lazy"><figcaption>Sites, each at its own address</figcaption></figure>
+        <figure><img src="img/settings-light.png" alt="Settings page in the light theme" loading="lazy"><figcaption>Settings as forms, in the light theme</figcaption></figure>
+      </div>
+    </section>
+
+    <section id="install">
+      <h2>Install in a minute</h2>
+      <p class="sub">The installer puts Runqora in your user profile. Your servers and databases live in their own folder and stay put if you uninstall.</p>
+      <ol class="steps">
+        <li><b>Download the installer</b><span><code>Runqora-Setup-x64.exe</code> from the button above.</span></li>
+        <li><b>Run it</b><span>Windows may show a SmartScreen notice because the installer is not code-signed yet: choose <i>More info</i>, then <i>Run anyway</i>.</span></li>
+        <li><b>Open Runqora and press Install</b><span>on Apache, PHP, MariaDB and phpMyAdmin, then Start all.</span></li>
+      </ol>
+    </section>
+
+    <div class="cta-band">
+      <h2>Ready when you are</h2>
+      <p class="sub" style="margin-inline:auto">Free, open source and made for developers on Windows.</p>
+      <a class="btn primary" href="https://github.com/ShoaibAhmedSoomro/runqora/releases/latest/download/Runqora-Setup-x64.exe">Download for Windows</a>
+    </div>
+  </main>
+
+  <footer>
+    <div>Runqora by <a href="https://github.com/ShoaibAhmedSoomro">Shoaib Ahmed Soomro</a> · <a href="https://github.com/ShoaibAhmedSoomro/runqora/blob/main/LICENSE">MIT license</a><br>Apache, PHP, MariaDB, phpMyAdmin, Tomcat and WordPress belong to their projects; Runqora is not affiliated with them.</div>
+    <div class="social">
+      <a href="https://github.com/ShoaibAhmedSoomro">GitHub</a>
+      <a href="https://www.linkedin.com/in/shoaibaofficial/">LinkedIn</a>
+      <a href="https://www.instagram.com/shoaib_ahmedsoomro">Instagram</a>
+      <a href="https://www.facebook.com/shoaibahmedsoomroofficial/">Facebook</a>
+    </div>
+  </footer>
+</div>
+<script>
+// show the newest version number from GitHub; the page works without it
+fetch("https://api.github.com/repos/ShoaibAhmedSoomro/runqora/releases/latest").then((r) => (r.ok ? r.json() : null)).then((d) => {
+  if (d && d.tag_name) document.getElementById("ver").textContent = "version " + d.tag_name.replace(/^v/, "");
+}).catch(() => {});
+</script>
+</body>
+</html>

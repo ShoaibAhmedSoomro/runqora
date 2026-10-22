@@ -4,7 +4,7 @@
 //! Safety rules: only https downloads from known hosts, every archive checked against the publisher's SHA-256,
 //! never touch a running server, the user's configuration and data are carried over, the previous version is kept.
 
-use crate::{component, fwd, manifest, push_note, root, save_settings_in, settings, settings_in, sha256_file, start, state, stop, unpack_to, Component};
+use crate::{check_hash, component, fwd, manifest, push_note, read_marker, root, save_settings_in, settings, settings_in, start, state, stop, unpack_component, write_marker, Component};
 use serde::Serialize;
 use std::{
     fs,
@@ -15,10 +15,13 @@ use std::{
 };
 
 const NO_WINDOW: u32 = 0x0800_0000;
-const HOSTS: &[&str] = &[
+pub const HOSTS: &[&str] = &[
     "windows.php.net", "downloads.php.net", "www.apachelounge.com", "downloads.mariadb.org", "archive.mariadb.org", "files.phpmyadmin.net", "www.phpmyadmin.net",
+    "api.adoptium.net", "github.com", "api.github.com", "archive.apache.org", "api.wordpress.org", "wordpress.org", "downloads.wordpress.org", "nodejs.org", "getcomposer.org",
 ];
-const NOTES_HOSTS: &[&str] = &["www.php.net", "www.apachelounge.com", "mariadb.com", "www.phpmyadmin.net", "httpd.apache.org"];
+const NOTES_HOSTS: &[&str] = &[
+    "www.php.net", "www.apachelounge.com", "mariadb.com", "www.phpmyadmin.net", "httpd.apache.org", "github.com", "tomcat.apache.org", "adoptium.net", "wordpress.org", "nodejs.org",
+];
 
 // ---- types ----
 
@@ -109,6 +112,17 @@ pub fn detect_version(c: &Component, root: &Path) -> Option<String> {
         return None;
     }
     let after = |text: &str, marker: &str| text.split_once(marker).map(|(_, r)| parse_ver(r)).filter(|v| !v.is_empty()).map(|v| v.iter().map(u32::to_string).collect::<Vec<_>>().join("."));
+    let dir = root.join(&c.extract_to);
+    // the newer modules: what Runqora itself installed is the most reliable record; the program is the fallback
+    if matches!(c.id.as_str(), "jre" | "tomcat" | "mailpit" | "sftpgo" | "wordpress" | "node" | "composer" | "adminer") {
+        return read_marker(&dir).or_else(|| match c.id.as_str() {
+            "jre" => after(&run_capture(&bin, &["-version"])?, "version \""),
+            "tomcat" => after(&fs::read_to_string(dir.join("RELEASE-NOTES")).ok()?, "Apache Tomcat Version "),
+            "wordpress" => after(fs::read_to_string(dir.join("wp-includes/version.php")).ok()?.split_once("$wp_version = '")?.1, ""),
+            "node" => after(&run_capture(&bin, &["-v"])?, "v"),
+            _ => None,
+        });
+    }
     match c.id.as_str() {
         "apache" => after(&run_capture(&bin, &["-v"])?, "Apache/"),
         "php" => after(&run_capture(&bin, &["-v"])?, "PHP "),
@@ -273,6 +287,147 @@ pub fn pma_php_range(json: &str, installed: &str) -> Option<String> {
     v["releases"].as_array()?.iter().find(|r| line_of(r["version"].as_str().unwrap_or("")) == line_of(installed)).and_then(|r| r["php_versions"].as_str()).map(str::to_string)
 }
 
+// ---- parsers for the newer modules ----
+
+fn plain(version: &str, current: &str, name: &str, url: String, hash: String, strip: &str, notes: String, extra: Vec<String>) -> Candidate {
+    let kind = kind_of(current, version);
+    let mut warnings = extra;
+    if kind != "patch" {
+        warnings.insert(0, format!("{name} {} is a new release line: behaviour and settings can change. Test your sites and projects before relying on it.", line_of(version)));
+    }
+    Candidate { version: version.into(), kind, line: line_of(version), url, sha256: hash, strip_prefix: strip.into(), notes_url: notes, warnings }
+}
+
+fn hex_token(text: &str, len: usize) -> Option<String> {
+    text.split(|c: char| !c.is_ascii_hexdigit()).find(|t| t.len() == len).map(str::to_lowercase)
+}
+
+/// api.adoptium.net/v3/assets/latest/<major>/hotspot -> the Windows JRE zip, if newer than `current`
+pub fn parse_adoptium(json: &str, current: &str) -> Option<Candidate> {
+    let v: serde_json::Value = serde_json::from_str(json).ok()?;
+    let rel = v.as_array()?.first()?;
+    let version = rel["release_name"].as_str()?.strip_prefix("jdk-")?.split('+').next()?.to_string();
+    if cmp_ver(&version, current).is_le() {
+        return None;
+    }
+    let pkg = &rel["binary"]["package"];
+    Some(plain(&version, current, "Java", pkg["link"].as_str()?.into(), pkg["checksum"].as_str()?.to_lowercase(), "*", "https://adoptium.net/temurin/release-notes/".into(), vec![]))
+}
+
+/// api.adoptium.net/v3/info/available_releases -> the newest long-term release
+pub fn parse_adoptium_lts(json: &str) -> Option<u32> {
+    let v: serde_json::Value = serde_json::from_str(json).ok()?;
+    v["available_lts_releases"].as_array()?.iter().filter_map(|x| x.as_u64()).max().map(|m| m as u32)
+}
+
+/// Directory listing of archive.apache.org/dist/tomcat/tomcat-N/ -> release versions, oldest first (no milestones)
+pub fn parse_tomcat_versions(html: &str) -> Vec<String> {
+    let mut v: Vec<String> = html.split("href=\"v").skip(1).filter_map(|r| r.split('/').next()).filter(|s| !s.is_empty() && s.chars().all(|c| c.is_ascii_digit() || c == '.')).map(str::to_string).collect();
+    v.sort_by(|a, b| cmp_ver(a, b));
+    v.dedup();
+    v
+}
+
+pub fn tomcat_candidate(version: &str, sha512_text: &str, current: &str) -> Option<Candidate> {
+    let sha = hex_token(sha512_text, 128)?;
+    let major = *parse_ver(version).first()?;
+    let extra = if kind_of(current, version) == "major" { vec!["Tomcat moves to a newer Jakarta EE here: web applications built for the old one may need changes.".to_string()] } else { vec![] };
+    Some(plain(
+        version,
+        current,
+        "Tomcat",
+        format!("https://archive.apache.org/dist/tomcat/tomcat-{major}/v{version}/bin/apache-tomcat-{version}-windows-x64.zip"),
+        format!("sha512:{sha}"),
+        &format!("apache-tomcat-{version}/"),
+        "https://tomcat.apache.org/whichversion.html".into(),
+        extra,
+    ))
+}
+
+/// A GitHub "latest release" JSON -> the asset `asset(version)`, with the digest GitHub shows for it
+pub fn parse_github_release(json: &str, current: &str, name: &str, asset: &dyn Fn(&str) -> String, strip: &str) -> Option<Candidate> {
+    let v: serde_json::Value = serde_json::from_str(json).ok()?;
+    let version = v["tag_name"].as_str()?.trim_start_matches('v').to_string();
+    if cmp_ver(&version, current).is_le() {
+        return None;
+    }
+    let want = asset(&version);
+    let a = v["assets"].as_array()?.iter().find(|a| a["name"] == want.as_str())?;
+    let digest = a["digest"].as_str()?.strip_prefix("sha256:")?.to_lowercase();
+    Some(plain(&version, current, name, a["browser_download_url"].as_str()?.into(), digest, strip, v["html_url"].as_str()?.into(), vec![]))
+}
+
+/// api.wordpress.org/core/version-check/1.7/ -> newer versions of the same line, and the newest release
+pub fn parse_wordpress(json: &str, current: &str) -> Vec<String> {
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(json) else { return vec![] };
+    let mut out: Vec<String> = v["offers"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|o| o["response"] == "upgrade" || line_of(o["version"].as_str().unwrap_or("")) == line_of(current))
+        .filter_map(|o| o["version"].as_str().map(str::to_string))
+        .filter(|ver| cmp_ver(ver, current).is_gt())
+        .collect();
+    out.sort_by(|a, b| cmp_ver(a, b));
+    out.dedup();
+    out
+}
+
+pub fn wp_candidate(version: &str, sha1_text: &str, current: &str) -> Option<Candidate> {
+    let sha = hex_token(sha1_text, 40)?;
+    let note = "This updates the copy Runqora uses for new sites. Sites you already made are not touched: update each one from its own Dashboard > Updates, after a backup.".to_string();
+    Some(plain(version, current, "WordPress", format!("https://downloads.wordpress.org/release/wordpress-{version}.zip"), format!("sha1:{sha}"), "wordpress/", "https://wordpress.org/news/category/releases/".into(), vec![note]))
+}
+
+/// nodejs.org/dist/index.json -> newest release of the installed major, and the newest LTS if it is a higher major
+pub fn parse_node(index: &str, current: &str) -> Vec<String> {
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(index) else { return vec![] };
+    let cur_major = parse_ver(current).first().copied().unwrap_or(0);
+    let all: Vec<(String, bool)> = v
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|e| e["files"].as_array().is_some_and(|f| f.iter().any(|x| x == "win-x64-zip")))
+        .filter_map(|e| Some((e["version"].as_str()?.trim_start_matches('v').to_string(), e["lts"].is_string())))
+        .collect();
+    let mut out = vec![];
+    if let Some((ver, _)) = all.iter().filter(|(ver, _)| parse_ver(ver).first() == Some(&cur_major) && cmp_ver(ver, current).is_gt()).max_by(|a, b| cmp_ver(&a.0, &b.0)) {
+        out.push(ver.clone());
+    }
+    if let Some((ver, _)) = all.iter().filter(|(ver, lts)| *lts && parse_ver(ver).first().is_some_and(|m| *m > cur_major)).max_by(|a, b| cmp_ver(&a.0, &b.0)) {
+        out.push(ver.clone());
+    }
+    out
+}
+
+pub fn node_candidate(version: &str, shasums: &str, current: &str) -> Option<Candidate> {
+    let file = format!("node-v{version}-win-x64.zip");
+    let sha = shasums.lines().find(|l| l.trim_end().ends_with(file.as_str())).and_then(|l| hex_token(l, 64))?;
+    let mut c = plain(version, current, "Node.js", format!("https://nodejs.org/dist/v{version}/{file}"), sha, "*", format!("https://nodejs.org/en/blog/release/v{version}"), vec![]);
+    if parse_ver(version).first() == parse_ver(current).first() {
+        c.kind = "patch"; // inside one Node major, minors only add things
+        c.warnings.clear();
+    }
+    Some(c)
+}
+
+/// getcomposer.org/versions -> the newest stable version, if newer
+pub fn parse_composer(json: &str, current: &str) -> Option<String> {
+    let v: serde_json::Value = serde_json::from_str(json).ok()?;
+    let ver = v["stable"].as_array()?.iter().filter_map(|e| e["version"].as_str()).max_by(|a, b| cmp_ver(a, b))?.to_string();
+    cmp_ver(&ver, current).is_gt().then_some(ver)
+}
+
+pub fn composer_candidate(version: &str, sha_text: &str, current: &str) -> Option<Candidate> {
+    let sha = hex_token(sha_text, 64)?;
+    let mut c = plain(version, current, "Composer", format!("https://getcomposer.org/download/{version}/composer.phar"), sha, "", format!("https://github.com/composer/composer/releases/tag/{version}"), vec![]);
+    if parse_ver(version).first() == parse_ver(current).first() {
+        c.kind = "patch";
+        c.warnings.clear();
+    }
+    Some(c)
+}
+
 // ---- checking ----
 
 fn installed(c: &Component, root: &Path) -> bool {
@@ -285,6 +440,10 @@ pub fn blocked_reason(c: &Component, root: &Path) -> Option<String> {
         "apache" if running("apache") => Some("Stop Apache first.".into()),
         "php" if running("apache") => Some("Stop Apache first: it has PHP loaded.".into()),
         "mariadb" if running("mariadb") => Some("Stop MariaDB first.".into()),
+        "tomcat" if running("tomcat") => Some("Stop Tomcat first.".into()),
+        "jre" if running("tomcat") => Some("Stop Tomcat first: it is running on this Java.".into()),
+        "mailpit" if running("mailpit") => Some("Stop Mailpit first.".into()),
+        "sftpgo" if running("sftpgo") => Some("Stop SFTPGo first.".into()),
         _ => None,
     }
 }
@@ -325,8 +484,65 @@ fn candidates_for(c: &Component, root: &Path, current: &str, pma_json: Option<&s
             }
             Ok(out)
         }
+        "jre" => {
+            let major = parse_ver(current).first().copied().unwrap_or(21);
+            let q = |m: u32| format!("https://api.adoptium.net/v3/assets/latest/{m}/hotspot?architecture=x64&image_type=jre&os=windows");
+            let mut out: Vec<Candidate> = parse_adoptium(&http_get(&q(major))?, current).into_iter().collect();
+            if let Some(lts) = parse_adoptium_lts(&http_get("https://api.adoptium.net/v3/info/available_releases")?).filter(|l| *l > major) {
+                out.extend(parse_adoptium(&http_get(&q(lts))?, current).map(|mut c| {
+                    c.warnings.push("Programs written for an older Java usually run on a newer one, but test your Tomcat applications.".into());
+                    c
+                }));
+            }
+            Ok(out)
+        }
+        "tomcat" => {
+            let major = parse_ver(current).first().copied().unwrap_or(10);
+            let mut out = vec![];
+            for m in [major, major + 1] {
+                let page = match http_get(&format!("https://archive.apache.org/dist/tomcat/tomcat-{m}/")) {
+                    Ok(p) => p,
+                    Err(_) if m > major => continue, // the next major simply may not exist
+                    Err(e) => return Err(e),
+                };
+                let Some(v) = parse_tomcat_versions(&page).into_iter().filter(|v| cmp_ver(v, current).is_gt()).last() else { continue };
+                let sha = http_get(&format!("https://archive.apache.org/dist/tomcat/tomcat-{m}/v{v}/bin/apache-tomcat-{v}-windows-x64.zip.sha512"))?;
+                out.extend(tomcat_candidate(&v, &sha, current));
+            }
+            Ok(out)
+        }
+        "mailpit" => Ok(parse_github_release(&http_get("https://api.github.com/repos/axllent/mailpit/releases/latest")?, current, "Mailpit", &|_| "mailpit-windows-amd64.zip".into(), "").into_iter().collect()),
+        "sftpgo" => Ok(parse_github_release(&http_get("https://api.github.com/repos/drakkan/sftpgo/releases/latest")?, current, "SFTPGo", &|v| format!("sftpgo_v{v}_windows_portable.zip"), "*").into_iter().collect()),
+        "adminer" => Ok(parse_github_release(&http_get("https://api.github.com/repos/vrana/adminer/releases/latest")?, current, "Adminer", &|v| format!("adminer-{v}.php"), "").into_iter().collect()),
+        "wordpress" => {
+            let mut out = vec![];
+            for v in parse_wordpress(&http_get(&format!("https://api.wordpress.org/core/version-check/1.7/?version={current}"))?, current) {
+                let sha = http_get(&format!("https://wordpress.org/wordpress-{v}.zip.sha1"))?;
+                out.extend(wp_candidate(&v, &sha, current));
+            }
+            Ok(out)
+        }
+        "node" => {
+            let mut out = vec![];
+            for v in parse_node(&http_get("https://nodejs.org/dist/index.json")?, current) {
+                let sums = http_get(&format!("https://nodejs.org/dist/v{v}/SHASUMS256.txt"))?;
+                out.extend(node_candidate(&v, &sums, current));
+            }
+            Ok(out)
+        }
+        "composer" => match parse_composer(&http_get("https://getcomposer.org/versions")?, current) {
+            Some(v) => Ok(composer_candidate(&v, &http_get(&format!("https://getcomposer.org/download/{v}/composer.phar.sha256sum"))?, current).into_iter().collect()),
+            None => Ok(vec![]),
+        },
         _ => Ok(vec![]),
     }
+}
+
+/// What a probe against the real publishers returns for an installed-or-not module, pretending `current` is installed.
+pub fn probe(id: &str, current: &str) -> Result<Vec<Candidate>, String> {
+    let c = component(id)?;
+    let pma_json = http_get("https://www.phpmyadmin.net/home_page/version.json").ok();
+    candidates_for(&c, &root(), current, pma_json.as_deref())
 }
 
 /// Check every installed component. Failures are reported per component, never as a whole.
@@ -366,6 +582,11 @@ pub fn keep_rules(id: &str, kind: &str) -> Vec<(&'static str, Keep)> {
         "php" => vec![("php.ini", Keep::Copy)],
         "mariadb" => vec![("my.ini", Keep::Copy), ("data", if kind == "patch" { Keep::Move } else { Keep::Copy })],
         "phpmyadmin" => vec![("config.inc.php", Keep::Copy)],
+        "tomcat" => vec![("conf", Keep::Copy), ("webapps", Keep::Copy), ("logs", Keep::Move)],
+        "mailpit" => vec![("mailpit.db", Keep::Move)],
+        // the database, its settings and the host keys SFTPGo made for itself
+        "sftpgo" => vec![("sftpgo.db", Keep::Move), ("sftpgo.json", Keep::Copy), ("id_rsa", Keep::Copy), ("id_rsa.pub", Keep::Copy), ("id_ecdsa", Keep::Copy), ("id_ecdsa.pub", Keep::Copy), ("id_ed25519", Keep::Copy), ("id_ed25519.pub", Keep::Copy)],
+        "composer" => vec![("composer.bat", Keep::Copy)],
         _ => vec![],
     }
 }
@@ -477,12 +698,19 @@ fn prune(root: &Path, id: &str) {
 pub type Verify<'a> = &'a dyn Fn(&Component, &Path, &str) -> Result<Vec<String>, String>;
 
 pub fn verify_install(c: &Component, root: &Path, want: &str) -> Result<Vec<String>, String> {
+    if !root.join(&c.binary).exists() {
+        return Err(format!("{} is missing from the new version", c.binary));
+    }
     let got = detect_version(c, root).ok_or("the new files do not report a version")?;
     if got != want {
         return Err(format!("expected {want} but found {got}"));
     }
     let mut warnings = vec![];
     match c.id.as_str() {
+        "jre" if !run_capture(&root.join(&c.binary), &["-version"]).unwrap_or_default().to_lowercase().contains("version") => return Err("the new Java does not start".into()),
+        "node" if !run_capture(&root.join(&c.binary), &["-v"]).unwrap_or_default().trim_start().starts_with('v') => return Err("the new Node.js does not start".into()),
+        "mailpit" if run_capture(&root.join(&c.binary), &["version"]).unwrap_or_default().trim().is_empty() => return Err("the new Mailpit does not start".into()),
+        "tomcat" if !root.join("tomcat/bin/bootstrap.jar").exists() => return Err("Tomcat's bootstrap.jar is missing".into()),
         "apache" => {
             let out = run_capture(&root.join(&c.binary), &["-d", &fwd(&root.join(&c.extract_to)), "-t"]).unwrap_or_default();
             if !out.contains("Syntax OK") {
@@ -523,15 +751,13 @@ pub fn apply_from_zip(c: &Component, root: &Path, cand: &Candidate, zip: &Path, 
     if let Some(b) = blocked_reason(c, root) {
         return Err(b);
     }
-    let got = sha256_file(zip).map_err(|e| e.to_string())?;
-    if !got.eq_ignore_ascii_case(&cand.sha256) {
-        return Err(format!("the download does not match the publisher's checksum (expected {}, got {got}); nothing was changed", cand.sha256));
-    }
+    check_hash(&cand.sha256, zip)?;
     let live = root.join(&c.extract_to);
     let old = detect_version(c, root).unwrap_or_else(|| c.version.clone());
     let stage = root.join("tmp").join(format!("stage-{}", c.id));
     remove_any(&stage);
-    unpack_to(zip, &stage, &cand.strip_prefix)?;
+    unpack_component(c, zip, &stage, &cand.strip_prefix)?;
+    write_marker(&stage, &cand.version);
     let made = now();
     let dir = backups_dir(root, &c.id).join(made.to_string());
     let keep = keep_rules(&c.id, cand.kind);

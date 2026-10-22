@@ -50,6 +50,9 @@ pub struct Component {
     /// components that must be installed first (Tomcat needs the JRE)
     #[serde(default)]
     pub needs: Vec<String>,
+    /// the download is one file (Composer, Adminer) saved as `binary`, not an archive
+    #[serde(default)]
+    pub single_file: bool,
     /// also the "is installed" marker
     pub binary: String,
     /// None = library (no process): php, phpmyadmin. {root} is replaced.
@@ -289,6 +292,9 @@ pub fn extra_conf_with(root: &Path, settings: &Settings) -> String {
         // local only: the database root account has no password by default
         s += &format!("Alias /phpmyadmin \"{r}/phpmyadmin\"\n<Directory \"{r}/phpmyadmin\">\n    Require local\n</Directory>\n");
     }
+    if root.join("adminer/adminer.php").exists() {
+        s += &format!("Alias /adminer \"{r}/adminer\"\n<Directory \"{r}/adminer\">\n    Require local\n</Directory>\n");
+    }
     s
 }
 
@@ -395,6 +401,11 @@ pub fn post_install(c: &Component, root: &Path) -> Result<(), String> {
                 }
             }
         }
+        "composer" => {
+            // `composer` on the command line: runs the phar with Runqora's PHP
+            let bat = format!("@echo off\r\n\"{}\\php\\php.exe\" \"%~dp0composer.phar\" %*\r\n", root.display());
+            fs::write(dir.join("composer.bat"), bat).map_err(|e| e.to_string())?;
+        }
         "tomcat" => {
             let xml = dir.join("conf/server.xml");
             let text = fs::read_to_string(&xml).map_err(|e| format!("server.xml missing after unpack: {e}"))?;
@@ -459,7 +470,41 @@ pub fn wire_mail(root: &Path) -> Result<(), String> {
 // ---- install ----
 
 pub fn unpack(c: &Component, zip_path: &Path, root: &Path) -> Result<(), String> {
-    unpack_to(zip_path, &root.join(&c.extract_to), &c.strip_prefix)
+    unpack_component(c, zip_path, &root.join(&c.extract_to), &c.strip_prefix)
+}
+
+/// Put a download into `dest`: an archive is extracted, a single file is copied in under the name of `binary`.
+pub fn unpack_component(c: &Component, file: &Path, dest: &Path, strip_prefix: &str) -> Result<(), String> {
+    if !c.single_file {
+        return unpack_to(file, dest, strip_prefix);
+    }
+    let name = Path::new(&c.binary).file_name().ok_or("bad binary path")?;
+    fs::create_dir_all(dest).map_err(|e| e.to_string())?;
+    fs::copy(file, dest.join(name)).map(|_| ()).map_err(|e| e.to_string())
+}
+
+/// Runqora's own record of which version it put in a component folder. Programs that do not report a version
+/// reliably (and every component after an update) are read from here.
+pub const MARKER: &str = ".runqora-version";
+
+pub fn write_marker(dir: &Path, version: &str) {
+    let _ = fs::write(dir.join(MARKER), version);
+}
+
+pub fn read_marker(dir: &Path) -> Option<String> {
+    fs::read_to_string(dir.join(MARKER)).ok().map(|t| t.trim().to_string()).filter(|t| !t.is_empty())
+}
+
+/// "sha256:<hex>", "sha512:<hex>", "sha1:<hex>" or a bare SHA-256 hex.
+pub fn check_hash(spec: &str, file: &Path) -> Result<(), String> {
+    let (algo, want) = spec.split_once(':').unwrap_or(("sha256", spec));
+    let got = match algo {
+        "sha256" => sha256_file(file).map_err(|e| e.to_string())?,
+        "sha512" => sha512_file(file).map_err(|e| e.to_string())?,
+        "sha1" => sha1_file(file)?,
+        other => return Err(format!("unknown checksum type {other}")),
+    };
+    if got.eq_ignore_ascii_case(want) { Ok(()) } else { Err(format!("the download does not match the publisher's checksum (expected {want}, got {got}); nothing was changed")) }
 }
 
 /// Extract `zip_path` into `dest`, dropping the archive's top folder `strip_prefix`. Refuses unsafe paths.
@@ -541,6 +586,7 @@ pub fn install_from_zip(c: &Component, zip_path: &Path, root: &Path) -> Result<(
     }
     verify_hash(c, zip_path)?;
     unpack(c, zip_path, root)?;
+    write_marker(&root.join(&c.extract_to), &c.version);
     if !root.join(&c.binary).exists() {
         // the publisher changed the archive layout: do not leave a half install that says "missing" forever
         let _ = fs::remove_dir_all(root.join(&c.extract_to));
@@ -573,6 +619,7 @@ pub fn install(c: &Component, root: &Path) -> Result<(), String> {
 
 pub mod config;
 pub mod fixes;
+pub mod appupdate;
 pub mod externals;
 pub mod https;
 pub mod sites;
@@ -1469,7 +1516,7 @@ smtp_port = 1025
     fn manifest_is_valid() {
         let m = manifest();
         let ids: Vec<_> = m.components.iter().map(|c| c.id.as_str()).collect();
-        assert_eq!(ids, ["apache", "php", "mariadb", "phpmyadmin", "jre", "tomcat", "mailpit", "sftpgo", "wordpress"]);
+        assert_eq!(ids, ["apache", "php", "mariadb", "phpmyadmin", "jre", "tomcat", "mailpit", "sftpgo", "wordpress", "node", "composer", "adminer"]);
         for c in &m.components {
             validate(c).unwrap();
         }

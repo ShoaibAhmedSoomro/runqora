@@ -10,17 +10,38 @@
       "strip_prefix": "Apache24/",
       "extract_to": "apache",
       "binary": "apache/bin/httpd.exe",
-      "args": ["-d", "{root}/apache"],
+      "args": [
+        "-d",
+        "{root}/apache"
+      ],
       "pidfile": "apache/logs/httpd.pid",
       "shutdown_event": "ap{pid}_shutdown",
       "port": 80,
       "admin_url": "http://localhost:{port}/",
-      "configs": ["apache/conf/httpd.conf", "apache/conf/extra/runqora.conf"],
-      "logs": ["apache/logs/error_log", "apache/logs/access_log"],
+      "configs": [
+        "apache/conf/httpd.conf",
+        "apache/conf/extra/runqora.conf"
+      ],
+      "logs": [
+        "apache/logs/error_log",
+        "apache/logs/access_log"
+      ],
       "service": {
         "name": "RunqoraApache",
-        "install": ["-d", "{root}/apache", "-k", "install", "-n", "{service}"],
-        "remove": ["-k", "uninstall", "-n", "{service}"]
+        "install": [
+          "-d",
+          "{root}/apache",
+          "-k",
+          "install",
+          "-n",
+          "{service}"
+        ],
+        "remove": [
+          "-k",
+          "uninstall",
+          "-n",
+          "{service}"
+        ]
       }
     },
     {
@@ -32,7 +53,9 @@
       "strip_prefix": "",
       "extract_to": "php",
       "binary": "php/php.exe",
-      "configs": ["php/php.ini"]
+      "configs": [
+        "php/php.ini"
+      ]
     },
     {
       "id": "mariadb",
@@ -43,17 +66,31 @@
       "strip_prefix": "mariadb-10.11.19-winx64/",
       "extract_to": "mariadb",
       "binary": "mariadb/bin/mysqld.exe",
-      "args": ["--defaults-file={root}/mariadb/my.ini", "--standalone"],
+      "args": [
+        "--defaults-file={root}/mariadb/my.ini",
+        "--standalone"
+      ],
       "pidfile": "mariadb/data/mysql.pid",
       "shutdown_event": "MySQLShutdown{pid}",
       "port": 3306,
       "admin_url": "http://localhost:{apache_port}/phpmyadmin/",
-      "configs": ["mariadb/my.ini"],
-      "logs": ["mariadb/data/mysql_error.log"],
+      "configs": [
+        "mariadb/my.ini"
+      ],
+      "logs": [
+        "mariadb/data/mysql_error.log"
+      ],
       "service": {
         "name": "RunqoraMariaDB",
-        "install": ["--install", "{service}", "--defaults-file={root}/mariadb/my.ini"],
-        "remove": ["--remove", "{service}"]
+        "install": [
+          "--install",
+          "{service}",
+          "--defaults-file={root}/mariadb/my.ini"
+        ],
+        "remove": [
+          "--remove",
+          "{service}"
+        ]
       }
     },
     {
@@ -65,7 +102,9 @@
       "strip_prefix": "phpMyAdmin-5.2.3-all-languages/",
       "extract_to": "phpmyadmin",
       "binary": "phpmyadmin/index.php",
-      "configs": ["phpmyadmin/config.inc.php"]
+      "configs": [
+        "phpmyadmin/config.inc.php"
+      ]
     },
     {
       "id": "jre",
@@ -87,13 +126,25 @@
       "extract_to": "tomcat",
       "binary": "tomcat/bin/bootstrap.jar",
       "exe": "jre/bin/java.exe",
-      "needs": ["jre"],
+      "needs": [
+        "jre"
+      ],
       "args": [
-        "-Dcatalina.home={root}/tomcat", "-Dcatalina.base={root}/tomcat", "-Djava.io.tmpdir={root}/tomcat/temp", "-Dfile.encoding=UTF-8",
-        "-Djava.util.logging.config.file={root}/tomcat/conf/logging.properties", "-Djava.util.logging.manager=org.apache.juli.ClassLoaderLogManager",
-        "--add-opens=java.base/java.lang=ALL-UNNAMED", "--add-opens=java.base/java.io=ALL-UNNAMED", "--add-opens=java.base/java.util=ALL-UNNAMED",
-        "--add-opens=java.base/java.util.concurrent=ALL-UNNAMED", "--add-opens=java.rmi/sun.rmi.transport=ALL-UNNAMED",
-        "-classpath", "{root}/tomcat/bin/bootstrap.jar;{root}/tomcat/bin/tomcat-juli.jar", "org.apache.catalina.startup.Bootstrap", "start"
+        "-Dcatalina.home={root}/tomcat",
+        "-Dcatalina.base={root}/tomcat",
+        "-Djava.io.tmpdir={root}/tomcat/temp",
+        "-Dfile.encoding=UTF-8",
+        "-Djava.util.logging.config.file={root}/tomcat/conf/logging.properties",
+        "-Djava.util.logging.manager=org.apache.juli.ClassLoaderLogManager",
+        "--add-opens=java.base/java.lang=ALL-UNNAMED",
+        "--add-opens=java.base/java.io=ALL-UNNAMED",
+        "--add-opens=java.base/java.util=ALL-UNNAMED",
+        "--add-opens=java.base/java.util.concurrent=ALL-UNNAMED",
+        "--add-opens=java.rmi/sun.rmi.transport=ALL-UNNAMED",
+        "-classpath",
+        "{root}/tomcat/bin/bootstrap.jar;{root}/tomcat/bin/tomcat-juli.jar",
+        "org.apache.catalina.startup.Bootstrap",
+        "start"
       ],
       "write_pid": true,
       "pidfile": "tomcat/temp/runqora.pid",
@@ -101,7 +152,10 @@
       "shutdown_text": "SHUTDOWN",
       "port": 8080,
       "admin_url": "http://localhost:{port}/",
-      "configs": ["tomcat/conf/server.xml", "tomcat/conf/tomcat-users.xml"]
+      "configs": [
+        "tomcat/conf/server.xml",
+        "tomcat/conf/tomcat-users.xml"
+      ]
     },
     {
       "id": "mailpit",
@@ -112,7 +166,14 @@
       "strip_prefix": "",
       "extract_to": "mailpit",
       "binary": "mailpit/mailpit.exe",
-      "args": ["--listen", "127.0.0.1:{port}", "--smtp", "127.0.0.1:1025", "--database", "{root}/mailpit/mailpit.db"],
+      "args": [
+        "--listen",
+        "127.0.0.1:{port}",
+        "--smtp",
+        "127.0.0.1:1025",
+        "--database",
+        "{root}/mailpit/mailpit.db"
+      ],
       "write_pid": true,
       "pidfile": "mailpit/mailpit.pid",
       "port": 8025,
@@ -127,7 +188,11 @@
       "strip_prefix": "*",
       "extract_to": "sftpgo",
       "binary": "sftpgo/sftpgo.exe",
-      "args": ["serve", "--config-dir", "{root}/sftpgo"],
+      "args": [
+        "serve",
+        "--config-dir",
+        "{root}/sftpgo"
+      ],
       "env": {
         "SFTPGO_HTTPD__BINDINGS__0__PORT": "{port}",
         "SFTPGO_HTTPD__BINDINGS__0__ADDRESS": "127.0.0.1",
@@ -150,6 +215,39 @@
       "strip_prefix": "wordpress/",
       "extract_to": "wordpress",
       "binary": "wordpress/wp-load.php"
+    },
+    {
+      "id": "node",
+      "name": "Node.js (LTS)",
+      "version": "24.22.1",
+      "url": "https://nodejs.org/dist/v24.22.1/node-v24.22.1-win-x64.zip",
+      "sha256": "d2046d28c2c3dcd211ac5145c0bf30e2047ef9dfb306693c8c6e2eccd8b95fa5",
+      "strip_prefix": "*",
+      "extract_to": "node",
+      "binary": "node/node.exe"
+    },
+    {
+      "id": "composer",
+      "name": "Composer",
+      "version": "2.10.3",
+      "url": "https://getcomposer.org/download/2.10.3/composer.phar",
+      "sha256": "7a2d379d5b8ffdaa028580ef26494c36d2feef4b178d3dd1473a4dbc5e17c8d6",
+      "strip_prefix": "",
+      "extract_to": "composer",
+      "binary": "composer/composer.phar",
+      "single_file": true
+    },
+    {
+      "id": "adminer",
+      "name": "Adminer",
+      "version": "6.1.2",
+      "url": "https://github.com/vrana/adminer/releases/download/v6.1.2/adminer-6.1.2.php",
+      "sha256": "b32316156bd18ffa99c1a27617142c2e5ad72260e37f15da4e9937a3dbb15f57",
+      "strip_prefix": "",
+      "extract_to": "adminer",
+      "binary": "adminer/adminer.php",
+      "single_file": true,
+      "admin_url": "http://localhost:{apache_port}/adminer/adminer.php"
     }
   ]
 }

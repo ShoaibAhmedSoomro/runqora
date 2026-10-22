@@ -242,6 +242,23 @@ fn open_developer(id: String) -> Result<(), String> {
     Command::new("cmd").args(["/C", "start", "", url]).creation_flags(NO_WINDOW).spawn().map(|_| ()).map_err(|e| e.to_string())
 }
 
+/// Is there a newer Runqora release on GitHub?
+#[tauri::command]
+async fn app_update_check() -> Result<Option<rt::appupdate::AppUpdate>, String> {
+    blocking(rt::appupdate::check).await
+}
+
+/// Download the newest installer, verify it, start it and close this window so it can replace the app.
+#[tauri::command]
+async fn app_update_install(app: tauri::AppHandle) -> Result<String, String> {
+    let msg = blocking(rt::appupdate::install).await?;
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(1500));
+        app.exit(0); // servers keep running: they are independent processes
+    });
+    Ok(msg)
+}
+
 /// Set once at startup: did the window get the Mica material? Only then may the UI turn translucent.
 static FX: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
@@ -371,7 +388,7 @@ fn main() {
             modules_status, module_start, module_stop, component_install, module_admin, module_service, module_open_file, modules_all, ports_scan, take_notes,
             settings_get, settings_set_editor, settings_set_port, settings_set_autostart, settings_set_auto_update, app_info, open_root,
             updates_check, update_apply, update_rollback, open_notes, fx_enabled,
-            developer_links, open_developer, sites_list, site_add, site_remove, site_open_folder, wordpress_create, externals_status, external_start, external_stop, external_open, external_get, appearance, apply_theme, open_url, https_status, https_trust, https_untrust, https_regenerate, config_get, config_set, module_restart, config_export, config_import, config_ini_text, setup_check, setup_fix, setup_fix_all, port_remedy, port_end, port_stop_service, port_suggest
+            app_update_check, app_update_install, developer_links, open_developer, sites_list, site_add, site_remove, site_open_folder, wordpress_create, externals_status, external_start, external_stop, external_open, external_get, appearance, apply_theme, open_url, https_status, https_trust, https_untrust, https_regenerate, config_get, config_set, module_restart, config_export, config_import, config_ini_text, setup_check, setup_fix, setup_fix_all, port_remedy, port_end, port_stop_service, port_suggest
         ])
         .setup(|app| {
             let item = |id: &str, label: &str| MenuItem::with_id(app, id, label, true, None::<&str>);

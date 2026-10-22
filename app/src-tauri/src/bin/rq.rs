@@ -17,7 +17,10 @@ Usage:
   rq external [status|start|stop|open|get] [filezilla|mercury]
                                run FileZilla Server / Mercury Mail when they are installed on this PC
   rq ports                list listening TCP ports with their programs
-  rq updates              look for newer versions of every installed module
+  rq updates              look for newer versions of every installed module and of Runqora itself
+  rq updates --probe <module> [pretend-version]
+                               ask the publisher what it offers for a module, as if that version were installed
+  rq app-update [--yes]   show the newest Runqora release; with --yes download it and open its installer
   rq update <module> [version] [--yes]
                                install the newest patch update, or the version you name.
                                Minor and major upgrades show their warnings and need --yes.
@@ -54,7 +57,9 @@ fn main() -> ExitCode {
         },
         Some("external") => external(&a[1..]),
         Some("ports") => ports(),
+        Some("updates") if a.get(1).map(String::as_str) == Some("--probe") => probe(&a[2..]),
         Some("updates") => updates(),
+        Some("app-update") => app_update(a.iter().any(|x| x == "--yes")),
         Some("config") => config(&a[1..]),
         Some("https") => https(a.get(1).map(String::as_str).unwrap_or("status")),
         Some("doctor") => doctor(a.iter().any(|x| x == "--fix")),
@@ -159,8 +164,50 @@ fn report(r: Result<String, String>) -> ExitCode {
     }
 }
 
+fn probe(args: &[String]) -> ExitCode {
+    let Some(id) = args.first() else { return usage("updates --probe needs a module name") };
+    let pretend = args.get(1).map(String::as_str).unwrap_or("0.0.1");
+    match rt::update::probe(id, pretend) {
+        Ok(v) if v.is_empty() => println!("The publisher offers nothing newer than {pretend}."),
+        Ok(v) => {
+            for c in v {
+                println!("{:<10} {:<9} {}
+           {}", c.version, c.kind, c.url, c.sha256);
+            }
+        }
+        Err(e) => return fail(e),
+    }
+    ExitCode::SUCCESS
+}
+
+fn app_update(install: bool) -> ExitCode {
+    match rt::appupdate::check() {
+        Err(e) => fail(format!("could not check: {e}")),
+        Ok(None) => {
+            println!("Runqora {} is the newest version.", rt::appupdate::current_version());
+            ExitCode::SUCCESS
+        }
+        Ok(Some(u)) => {
+            println!("Runqora {} is available (you have {}).
+{}", u.latest, u.current, u.notes_url);
+            if install { report(rt::appupdate::install()) } else { println!("Run: rq app-update --yes"); ExitCode::SUCCESS }
+        }
+    }
+}
+
 fn updates() -> ExitCode {
     println!("Checking the publishers...");
+    match rt::appupdate::check() {
+        Ok(Some(u)) => println!("
+Runqora (installed {})
+  {}  app update  [{}]", u.current, u.latest, u.notes_url),
+        Ok(None) => println!("
+Runqora (installed {})
+  up to date", rt::appupdate::current_version()),
+        Err(e) => println!("
+Runqora
+  could not check: {e}"),
+    }
     let infos = rt::update::check_updates();
     for i in &infos {
         println!("
@@ -193,7 +240,7 @@ fn update(args: &[String]) -> ExitCode {
     let Some(id) = pos.first() else { return usage("update needs a module name") };
     let infos = rt::update::check_updates();
     let Some(info) = infos.iter().find(|i| &i.id == *id) else {
-        eprintln!("'{id}' is not installed or has no updates (modules: apache, php, mariadb, phpmyadmin)");
+        eprintln!("'{id}' is not installed or has no updates (try: rq updates)");
         return ExitCode::from(2);
     };
     let pick = match pos.get(1) {

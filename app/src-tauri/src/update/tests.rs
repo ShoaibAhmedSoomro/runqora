@@ -1,4 +1,5 @@
 use super::*;
+use crate::sha256_file;
 use std::io::Write;
 
 fn z(path: &Path, entries: &[(&str, &str)]) -> String {
@@ -199,4 +200,174 @@ fn only_one_rollback_target_is_kept() {
         std::thread::sleep(Duration::from_millis(1100)); // backups are named by the second
     }
     assert_eq!(read_backups(&root, "mariadb").len(), 1, "older backups are deleted");
+}
+
+// ---- the newer modules: parsers against samples shaped like the real publishers' answers ----
+
+const ADOPTIUM: &str = r#"[{"release_name":"jdk-21.0.13+8","binary":{"package":{"link":"https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.13%2B8/OpenJDK21U-jre_x64_windows_hotspot_21.0.13_8.zip","checksum":"AABB"}}}]"#;
+
+#[test]
+fn java_updates_and_the_next_long_term_release() {
+    let c = parse_adoptium(ADOPTIUM, "21.0.12.1").unwrap();
+    assert_eq!((c.version.as_str(), c.kind, c.sha256.as_str(), c.strip_prefix.as_str()), ("21.0.13", "patch", "aabb", "*"));
+    assert!(c.url.starts_with("https://github.com/adoptium/") && host_allowed(&c.url, HOSTS) && c.warnings.is_empty());
+    assert!(parse_adoptium(ADOPTIUM, "21.0.13").is_none() && parse_adoptium("[]", "21").is_none() && parse_adoptium("nope", "21").is_none());
+    let major = parse_adoptium(&ADOPTIUM.replace("jdk-21.0.13+8", "jdk-25+36"), "21.0.12.1").unwrap();
+    assert_eq!((major.version.as_str(), major.kind), ("25", "major"));
+    assert!(major.warnings[0].contains("new release line"));
+    assert_eq!(parse_adoptium_lts(r#"{"available_lts_releases":[8,11,17,21,25],"available_releases":[8,26]}"#), Some(25));
+}
+
+#[test]
+fn tomcat_versions_come_from_the_listing_and_the_published_hash() {
+    let html = r#"<a href="v10.1.7/">v10.1.7/</a><a href="v10.1.61/">v10.1.61/</a><a href="v10.1.0-M1/">v10.1.0-M1/</a><a href="v10.1.9/">v10.1.9/</a><a href="../">../</a>"#;
+    let v = parse_tomcat_versions(html);
+    assert_eq!(v, ["10.1.7", "10.1.9", "10.1.61"], "numeric order, milestones left out");
+    let sha = "a".repeat(128);
+    let c = tomcat_candidate("10.1.62", &format!("{sha} *apache-tomcat-10.1.62-windows-x64.zip"), "10.1.61").unwrap();
+    assert_eq!((c.kind, c.strip_prefix.as_str()), ("patch", "apache-tomcat-10.1.62/"));
+    assert_eq!(c.sha256, format!("sha512:{sha}"));
+    assert_eq!(c.url, "https://archive.apache.org/dist/tomcat/tomcat-10/v10.1.62/bin/apache-tomcat-10.1.62-windows-x64.zip");
+    let next = tomcat_candidate("11.0.9", &sha, "10.1.61").unwrap();
+    assert_eq!(next.kind, "major");
+    assert!(next.warnings.iter().any(|w| w.contains("Jakarta")));
+    assert!(tomcat_candidate("10.1.62", "no hash here", "10.1.61").is_none());
+}
+
+fn gh(tag: &str, asset: &str) -> String {
+    format!(r#"{{"tag_name":"{tag}","html_url":"https://github.com/o/r/releases/tag/{tag}","assets":[{{"name":"{asset}","browser_download_url":"https://github.com/o/r/releases/download/{tag}/{asset}","digest":"sha256:ABC123"}},{{"name":"other.zip","browser_download_url":"x","digest":"sha256:00"}}]}}"#)
+}
+
+#[test]
+fn github_releases_give_the_asset_and_its_digest() {
+    let name = |v: &str| format!("sftpgo_v{v}_windows_portable.zip");
+    let c = parse_github_release(&gh("v2.7.7", "sftpgo_v2.7.7_windows_portable.zip"), "2.7.6", "SFTPGo", &name, "*").unwrap();
+    assert_eq!((c.version.as_str(), c.kind, c.sha256.as_str(), c.strip_prefix.as_str()), ("2.7.7", "patch", "abc123", "*"));
+    assert!(c.url.ends_with("sftpgo_v2.7.7_windows_portable.zip") && c.notes_url.ends_with("/tag/v2.7.7"));
+    assert_eq!(parse_github_release(&gh("v2.8.0", "sftpgo_v2.8.0_windows_portable.zip"), "2.7.6", "SFTPGo", &name, "*").unwrap().kind, "minor");
+    assert!(parse_github_release(&gh("v2.7.6", "sftpgo_v2.7.6_windows_portable.zip"), "2.7.6", "SFTPGo", &name, "*").is_none(), "same version");
+    assert!(parse_github_release(&gh("v2.7.7", "something-else.zip"), "2.7.6", "SFTPGo", &name, "*").is_none(), "the expected file is not attached");
+}
+
+#[test]
+fn wordpress_offers_the_same_line_and_the_newest_release() {
+    let json = r#"{"offers":[{"response":"upgrade","version":"7.1.3"},{"response":"autoupdate","version":"7.1.3"},{"response":"autoupdate","version":"7.0.7"},{"response":"autoupdate","version":"6.9.10"}]}"#;
+    assert_eq!(parse_wordpress(json, "7.0.5"), ["7.0.7", "7.1.3"], "a newer fix of the same line, and the newest release");
+    assert_eq!(parse_wordpress(json, "7.1.3"), Vec::<String>::new());
+    assert_eq!(parse_wordpress(json, "6.9.1"), ["6.9.10", "7.1.3"]);
+    let sha = "1".repeat(40);
+    let c = wp_candidate("7.1.3", &format!("{sha}\n"), "7.0.5").unwrap();
+    assert_eq!((c.kind, c.sha256.as_str(), c.strip_prefix.as_str()), ("minor", format!("sha1:{sha}").as_str(), "wordpress/"));
+    assert!(c.warnings.iter().any(|w| w.contains("Sites you already made are not touched")));
+    assert!(wp_candidate("7.1.3", "<html>", "7.0.5").is_none());
+}
+
+const NODE_INDEX: &str = r#"[{"version":"v26.12.1","lts":false,"files":["win-x64-zip"]},{"version":"v24.23.0","lts":"Krypton","files":["win-x64-zip"]},{"version":"v24.22.1","lts":"Krypton","files":["win-x64-zip"]},{"version":"v22.30.0","lts":"Jod","files":["win-x64-zip"]},{"version":"v22.31.0","lts":"Jod","files":["linux-x64"]}]"#;
+
+#[test]
+fn node_offers_its_own_major_and_the_newest_long_term_one() {
+    assert_eq!(parse_node(NODE_INDEX, "24.22.1"), ["24.23.0"], "a non-LTS 26 is never offered");
+    assert_eq!(parse_node(NODE_INDEX, "22.20.0"), ["22.30.0", "24.23.0"], "builds without a Windows zip are skipped");
+    let sums = "ffff0000ffff0000ffff0000ffff0000ffff0000ffff0000ffff0000ffff0000  node-v24.23.0-win-x64.zip\n1111111111111111111111111111111111111111111111111111111111111111  node-v24.23.0-win-x86.zip";
+    let c = node_candidate("24.23.0", sums, "24.22.1").unwrap();
+    assert_eq!((c.kind, c.strip_prefix.as_str()), ("patch", "*"), "minors inside a Node major are plain updates");
+    assert!(c.sha256.starts_with("ffff") && c.url == "https://nodejs.org/dist/v24.23.0/node-v24.23.0-win-x64.zip");
+    assert_eq!(node_candidate("26.0.0", &sums.replace("24.23.0", "26.0.0"), "24.22.1").unwrap().kind, "major");
+    assert!(node_candidate("24.99.0", sums, "24.22.1").is_none(), "no hash for that file");
+}
+
+#[test]
+fn composer_and_the_single_file_download() {
+    let json = r#"{"stable":[{"path":"/download/2.10.3/composer.phar","version":"2.10.3"}],"preview":[{"version":"2.11.0-RC1"}]}"#;
+    assert_eq!(parse_composer(json, "2.10.1").as_deref(), Some("2.10.3"));
+    assert_eq!(parse_composer(json, "2.10.3"), None);
+    let c = composer_candidate("2.10.3", &format!("{}  composer.phar", "ab".repeat(32)), "2.10.1").unwrap();
+    assert_eq!((c.kind, c.strip_prefix.as_str()), ("patch", ""));
+    assert!(host_allowed(&c.url, HOSTS) && c.url.ends_with("/2.10.3/composer.phar"));
+}
+
+#[test]
+fn every_download_spelling_is_checked_and_a_marker_names_the_version() {
+    let d = tmp("rt-newmods");
+    let f = d.join("x.bin");
+    fs::write(&f, "hello").unwrap();
+    let sha256 = sha256_file(&f).unwrap();
+    check_hash(&sha256, &f).unwrap();
+    check_hash(&format!("sha256:{}", sha256.to_uppercase()), &f).unwrap();
+    check_hash(&format!("sha512:{}", crate::sha512_file(&f).unwrap()), &f).unwrap();
+    check_hash(&format!("sha1:{}", crate::sha1_file(&f).unwrap()), &f).unwrap();
+    assert!(check_hash(&format!("sha512:{}", "0".repeat(128)), &f).unwrap_err().contains("does not match"));
+    assert!(check_hash("md5:00", &f).is_err());
+    write_marker(&d, "2.10.3");
+    assert_eq!(read_marker(&d).as_deref(), Some("2.10.3"));
+}
+
+#[test]
+fn a_single_file_module_installs_updates_and_keeps_its_wrapper() {
+    let root = tmp("rt-single");
+    let dl = root.join("tmp");
+    fs::create_dir_all(&dl).unwrap();
+    // install 1.0.0 (a bare file, as Composer is)
+    let v1 = dl.join("v1");
+    fs::write(&v1, "phar-1").unwrap();
+    let mut c = component("composer").unwrap();
+    c.sha256 = sha256_file(&v1).unwrap();
+    c.version = "1.0.0".into();
+    crate::install_from_zip(&c, &v1, &root).unwrap();
+    assert_eq!(fs::read_to_string(root.join("composer/composer.phar")).unwrap(), "phar-1");
+    assert!(root.join("composer/composer.bat").exists(), "the command-line wrapper is made on install");
+    assert_eq!(detect_version(&c, &root).as_deref(), Some("1.0.0"));
+    // update to 1.0.1: file replaced, wrapper kept, marker and backup updated
+    let v2 = dl.join("v2");
+    fs::write(&v2, "phar-2").unwrap();
+    let cand = Candidate { version: "1.0.1".into(), kind: "patch", line: "1.0".into(), url: String::new(), sha256: sha256_file(&v2).unwrap(), strip_prefix: String::new(), notes_url: String::new(), warnings: vec![] };
+    apply_from_zip(&c, &root, &cand, &v2, &verify_install).unwrap();
+    assert_eq!(fs::read_to_string(root.join("composer/composer.phar")).unwrap(), "phar-2");
+    assert!(root.join("composer/composer.bat").exists());
+    assert_eq!(detect_version(&c, &root).as_deref(), Some("1.0.1"));
+    assert_eq!(latest_backup(&root, "composer").unwrap().1.version, "1.0.0");
+    // a bad hash changes nothing
+    let bad = Candidate { sha256: "00".repeat(32), version: "1.0.2".into(), ..cand.clone() };
+    assert!(apply_from_zip(&c, &root, &bad, &v2, &verify_install).unwrap_err().contains("does not match"));
+    assert_eq!(fs::read_to_string(root.join("composer/composer.phar")).unwrap(), "phar-2");
+    // roll back
+    rollback_with(&c, &root, &verify_install).unwrap();
+    assert_eq!(fs::read_to_string(root.join("composer/composer.phar")).unwrap(), "phar-1");
+    assert_eq!(detect_version(&c, &root).as_deref(), Some("1.0.0"));
+}
+
+#[test]
+fn the_data_of_mail_and_ftp_servers_survives_an_update() {
+    let root = tmp("rt-mailupd");
+    let live = root.join("mailpit");
+    fs::create_dir_all(&live).unwrap();
+    fs::write(live.join("mailpit.exe"), "old").unwrap();
+    fs::write(live.join("mailpit.db"), "my 1000 emails").unwrap();
+    let zp = root.join("new.zip");
+    let sha = z(&zp, &[("mailpit.exe", "new")]);
+    let mut c = component("mailpit").unwrap();
+    c.version = "1.0.0".into();
+    let cand = Candidate { version: "1.0.1".into(), kind: "patch", line: "1.0".into(), url: String::new(), sha256: sha, strip_prefix: String::new(), notes_url: String::new(), warnings: vec![] };
+    apply_from_zip(&c, &root, &cand, &zp, &ok).unwrap();
+    assert_eq!(fs::read_to_string(live.join("mailpit.exe")).unwrap(), "new");
+    assert_eq!(fs::read_to_string(live.join("mailpit.db")).unwrap(), "my 1000 emails");
+    assert_eq!(read_marker(&live).as_deref(), Some("1.0.1"));
+    let tomcat = keep_rules("tomcat", "patch");
+    assert!(tomcat.iter().any(|(r, _)| *r == "webapps") && tomcat.iter().any(|(r, _)| *r == "conf"), "the user's web applications and settings are carried over");
+    assert!(keep_rules("sftpgo", "patch").iter().any(|(r, _)| *r == "sftpgo.db"));
+}
+
+/// The real publishers, read live (needs the internet): every parser still understands what they send today.
+#[test]
+#[ignore]
+fn live_publishers_still_parse() {
+    for (id, pretend) in [("jre", "21.0.1"), ("tomcat", "10.1.1"), ("mailpit", "1.0.0"), ("sftpgo", "2.0.0"), ("wordpress", "6.0.0"), ("node", "20.0.0"), ("composer", "2.0.0"), ("adminer", "4.0.0")] {
+        let c = probe(id, pretend).unwrap_or_else(|e| panic!("{id}: {e}"));
+        assert!(!c.is_empty(), "{id}: nothing offered for {pretend}");
+        for x in &c {
+            assert!(host_allowed(&x.url, HOSTS), "{id}: {}", x.url);
+            let hex = x.sha256.split(':').next_back().unwrap();
+            assert!([40, 64, 128].contains(&hex.len()), "{id}: bad hash {}", x.sha256);
+        }
+    }
 }

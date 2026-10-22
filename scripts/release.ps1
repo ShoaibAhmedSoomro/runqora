@@ -27,7 +27,11 @@ Set-Location $root
 if (git status --porcelain) { throw "Commit or stash your changes first: the release commit must contain only the version bump." }
 $old = (Select-String -Path "$tauri\Cargo.toml" -Pattern '^version = "(.+)"').Matches[0].Groups[1].Value
 if ([version]$Version -lt [version]$old) { throw "Version $Version is older than $old." }  # equal is fine: the bump may already be committed
-if (gh release view "v$Version" --repo $Repo 2>$null) { throw "Release v$Version already exists." }
+$ErrorActionPreference = "Continue"  # gh prints "release not found" to stderr, which Windows PowerShell 5.1 would treat as fatal
+gh release view "v$Version" --repo $Repo *> $null
+$exists = ($LASTEXITCODE -eq 0)
+$ErrorActionPreference = "Stop"
+if ($exists) { throw "Release v$Version already exists." }
 
 # 1. version
 (Get-Content "$tauri\Cargo.toml" -Raw) -replace '(?m)^version = ".+"', "version = `"$Version`"" | Set-Content "$tauri\Cargo.toml" -NoNewline -Encoding utf8

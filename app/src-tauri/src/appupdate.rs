@@ -55,13 +55,16 @@ pub fn check() -> Result<Option<AppUpdate>, String> {
 
 /// Download the newest installer, verify it and start it. The caller then closes the app so the installer can replace it.
 pub fn install() -> Result<String, String> {
+    let _busy = crate::Busy::new("app", "Looking up the release");
     let u = check()?.ok_or("Runqora is already the newest version")?; // look it up again: the UI only asked for "the update"
     let file = root().join("tmp").join(ASSET);
-    download(&u.url, &file)?;
+    download("app", &u.url, &file)?;
+    crate::progress_set("app", "Checking the download", 0, 0);
     if let Err(e) = check_hash(&u.sha256, &file) {
         let _ = std::fs::remove_file(&file);
         return Err(e);
     }
+    crate::progress_set("app", "Opening the installer", 0, 0);
     Command::new(&file).spawn().map_err(|e| format!("could not start the installer: {e}"))?;
     Ok(format!("The Runqora {} installer is open. Runqora closes now; finish the installer and it opens again.", u.latest))
 }

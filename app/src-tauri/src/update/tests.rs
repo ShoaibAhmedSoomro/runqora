@@ -405,3 +405,111 @@ fn every_module_can_be_resolved_to_a_current_download() {
         }
     }
 }
+
+// ---- the PHP 8.3 -> 8.5 failure: warnings before the version banner, a settings file from another PHP ----
+
+const PHP_WITH_WARNINGS: &str = "PHP Warning:  PHP Startup: bz2: Unable to initialize module\nModule compiled with module API=20230831\nPHP    compiled with module API=20250925\nThese options need to match\n in Unknown on line 0\nPHP Warning:  PHP Startup: Unable to load dynamic library 'curl' in Unknown on line 0\nPHP 8.5.12 (cli) (built: Oct 20 2026 04:19:35) (ZTS Visual C++ 2022 x64)\nCopyright (c) The PHP Group\n";
+
+#[test]
+fn the_php_version_is_found_even_when_warnings_come_first() {
+    assert_eq!(version_after(PHP_WITH_WARNINGS, "PHP ").as_deref(), Some("8.5.12"), "not 'PHP Warning:'");
+    assert_eq!(version_after("PHP 8.3.36 (cli)\nCopyright", "PHP ").as_deref(), Some("8.3.36"));
+    assert_eq!(version_after("Server version: Apache/2.4.66 (Win64)", "Apache/").as_deref(), Some("2.4.66"));
+    assert_eq!(version_after("5.2.3';\n", "").as_deref(), Some("5.2.3"), "an empty marker means the text starts with the version");
+    assert_eq!(version_after("PHP Warning: nothing numeric here", "PHP "), None);
+}
+
+#[test]
+fn startup_problems_are_told_apart_from_the_banner() {
+    assert!(php_startup_problem(PHP_WITH_WARNINGS));
+    assert!(php_startup_problem("PHP Deprecated:  Directive 'x' is deprecated in Unknown on line 0\nPHP 8.5.12 (cli)\n"));
+    assert!(php_startup_problem("Warning: PHP Startup: Unable to load dynamic library 'gd'\nPHP 8.4.1 (cli)\n"));
+    assert!(!php_startup_problem("PHP 8.5.12 (cli) (built: Oct 20 2026)\nCopyright (c) The PHP Group\nBuilt by The PHP Group\n"));
+    assert!(!php_startup_problem(""));
+    // the real output of PHP 8.5 with a settings file from 8.3: normal output first, error output last, banner in between
+    let real = "
+Deprecated: PHP Startup: session.sid_length INI setting is deprecated in Unknown on line 0
+
+Deprecated: PHP Startup: session.sid_bits_per_character INI setting is deprecated in Unknown on line 0
+PHP 8.5.12 (cli) (built: Oct 20 2026 04:19:35) (ZTS Visual C++ 2022 x64)
+Copyright (c) The PHP Group
+Built by The PHP Group
+Zend Engine v4.5.12, Copyright (c) Zend Technologies
+    with Zend OPcache v8.5.12, Copyright (c), by Zend Technologies
+PHP Deprecated:  PHP Startup: session.sid_length INI setting is deprecated in Unknown on line 0
+";
+    assert!(php_startup_problem(real), "notices before and after the banner are both seen");
+    assert_eq!(version_after(real, "PHP ").as_deref(), Some("8.5.12"));
+    assert!(!php_startup_problem("PHP 8.5.12 (cli) (built: Oct 20 2026)
+Zend Engine v4.5.12, Copyright (c) Zend Technologies
+    with Zend OPcache v8.5.12, Copyright (c), by Zend Technologies
+"), "a clean start is clean");
+}
+
+#[test]
+fn a_new_php_gets_a_fresh_settings_file_that_keeps_the_users_choices() {
+    let root = tmp("rt-phpini");
+    let php = root.join("php");
+    fs::create_dir_all(php.join("ext")).unwrap();
+    fs::write(php.join("php.exe"), "").unwrap();
+    for n in ["gd", "zip", "mysqli"] {
+        fs::write(php.join("ext").join(format!("php_{n}.dll")), "").unwrap(); // the extension switches are the DLLs this PHP ships
+    }
+    // the OLD settings file: the user raised two limits and switched an extension on
+    let old = crate::configure_php_ini("; template\nmemory_limit = 128M\nupload_max_filesize = 2M\n;extension=gd\n;extension=zip\n", &php).replace("memory_limit = 128M", "memory_limit = 1G").replace("upload_max_filesize = 2M", "upload_max_filesize = 64M").replace(";extension=zip", "extension=zip").replace("extension=gd", ";extension=gd"); // the user turned gd OFF (the installer would have switched it on)
+    fs::write(php.join("php.ini"), &old).unwrap();
+    // the NEW PHP's own template
+    fs::write(php.join("php.ini-development"), "; new template\nmemory_limit = 128M\nupload_max_filesize = 2M\n;extension=gd\n;extension=zip\nextension=mysqli\n").unwrap();
+    let lost = refresh_php_ini(&root).unwrap();
+    let ini = fs::read_to_string(php.join("php.ini")).unwrap();
+    assert!(ini.contains("; new template"), "built from the new template: {ini}");
+    assert!(ini.contains("memory_limit = 1G") && ini.contains("upload_max_filesize = 64M"), "the user's limits came back: {ini}");
+    assert!(ini.lines().any(|l| l == "extension=zip") && !ini.lines().any(|l| l == "extension=gd"), "the user's extensions came back: {ini}");
+    assert!(php.join("php.ini.old").exists() && fs::read_to_string(php.join("php.ini.old")).unwrap().contains("memory_limit = 1G"), "the old file is kept");
+    assert!(lost.is_empty(), "{lost:?}");
+}
+
+// ---- progress ----
+
+#[test]
+fn progress_is_reported_while_busy_and_gone_afterwards() {
+    {
+        let _b = crate::Busy::new("zz-test", "Starting");
+        assert_eq!(crate::progress_all().get("zz-test").map(|p| p.stage.as_str()), Some("Starting"));
+        crate::progress_set("zz-test", "Unpacking", 5, 10);
+        let p = crate::progress_all().remove("zz-test").unwrap();
+        assert_eq!((p.stage.as_str(), p.done, p.total), ("Unpacking", 5, 10));
+    }
+    assert!(!crate::progress_all().contains_key("zz-test"), "the entry goes away when the work ends, success or not");
+}
+
+/// A one-file HTTP server on localhost: the body is cut short when `cut` is set.
+fn serve_once(body: Vec<u8>, cut: bool) -> String {
+    use std::io::{Read as _, Write as _};
+    let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = l.local_addr().unwrap().port();
+    std::thread::spawn(move || {
+        let (mut s, _) = l.accept().unwrap();
+        let mut req = [0u8; 2048];
+        let _ = s.read(&mut req);
+        let _ = write!(s, "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len());
+        let send = if cut { &body[..body.len() / 2] } else { &body[..] };
+        let _ = s.write_all(send);
+    });
+    format!("http://127.0.0.1:{port}/file.zip")
+}
+
+#[test]
+fn a_download_reports_bytes_and_a_cut_connection_is_an_error_not_a_bad_file() {
+    let dir = tmp("rt-dl");
+    let body = vec![7u8; 600_000];
+    let to = dir.join("ok.bin");
+    crate::download_to("zz-dl", &serve_once(body.clone(), false), &to).unwrap();
+    assert_eq!(fs::read(&to).unwrap().len(), 600_000);
+    let p = crate::progress_all().remove("zz-dl").unwrap();
+    assert_eq!((p.stage.as_str(), p.done, p.total), ("Downloading", 600_000, 600_000), "the last report is the full size");
+    let cut = dir.join("cut.bin");
+    let e = crate::download_to("zz-dl2", &serve_once(body, true), &cut).unwrap_err();
+    assert!(e.contains("stopped early") || e.contains("interrupted"), "{e}");
+    assert!(!cut.exists() && !cut.with_extension("part").exists(), "a half download is never left under the real name");
+}

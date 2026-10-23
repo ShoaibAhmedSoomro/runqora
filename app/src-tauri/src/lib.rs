@@ -494,7 +494,7 @@ pub fn unpack(c: &Component, zip_path: &Path, root: &Path) -> Result<(), String>
 /// Put a download into `dest`: an archive is extracted, a single file is copied in under the name of `binary`.
 pub fn unpack_component(c: &Component, file: &Path, dest: &Path, strip_prefix: &str) -> Result<(), String> {
     if !c.single_file {
-        return unpack_to(file, dest, strip_prefix);
+        return unpack_to_with(file, dest, strip_prefix, &|done, total| progress_set(&c.id, "Unpacking", done, total));
     }
     let name = Path::new(&c.binary).file_name().ok_or("bad binary path")?;
     fs::create_dir_all(dest).map_err(|e| e.to_string())?;
@@ -525,8 +525,91 @@ pub fn check_hash(spec: &str, file: &Path) -> Result<(), String> {
     if got.eq_ignore_ascii_case(want) { Ok(()) } else { Err(format!("the download does not match the publisher's checksum (expected {want}, got {got}); nothing was changed")) }
 }
 
+// ---- progress: what a download or update is doing right now, for the window to show ----
+
+#[derive(Serialize, Clone, Debug, PartialEq)]
+pub struct Progress {
+    /// "Downloading", "Unpacking", ...
+    pub stage: String,
+    /// bytes or files done, and the total; total 0 = unknown (the bar shows activity instead of a percentage)
+    pub done: u64,
+    pub total: u64,
+}
+
+static PROGRESS: Mutex<BTreeMap<String, Progress>> = Mutex::new(BTreeMap::new());
+
+pub fn progress_set(id: &str, stage: &str, done: u64, total: u64) {
+    PROGRESS.lock().unwrap_or_else(|e| e.into_inner()).insert(id.to_string(), Progress { stage: stage.into(), done, total });
+}
+
+pub fn progress_all() -> BTreeMap<String, Progress> {
+    PROGRESS.lock().unwrap_or_else(|e| e.into_inner()).clone()
+}
+
+/// Marks `id` as busy for as long as it lives; the entry disappears when the work ends, however it ends.
+pub struct Busy(pub String);
+
+impl Busy {
+    pub fn new(id: &str, stage: &str) -> Busy {
+        progress_set(id, stage, 0, 0);
+        Busy(id.to_string())
+    }
+}
+
+impl Drop for Busy {
+    fn drop(&mut self) {
+        PROGRESS.lock().unwrap_or_else(|e| e.into_inner()).remove(&self.0);
+    }
+}
+
+/// Download `url` into `to`, reporting bytes as they arrive. The file appears under its real name only when complete.
+pub fn download_to(id: &str, url: &str, to: &Path) -> Result<(), String> {
+    fs::create_dir_all(to.parent().ok_or("bad path")?).map_err(|e| e.to_string())?;
+    let part = to.with_extension("part");
+    let resp = ureq::AgentBuilder::new().timeout_connect(Duration::from_secs(20)).user_agent("runqora/0.1").build().get(url).call().map_err(|e| format!("{url}: {e}"))?;
+    let total = resp.header("Content-Length").and_then(|v| v.parse::<u64>().ok()).unwrap_or(0);
+    let mut r = resp.into_reader();
+    progress_set(id, "Downloading", 0, total);
+    // whatever goes wrong, a half-written file must not stay behind
+    let copied = (|| -> Result<u64, String> {
+        let mut f = fs::File::create(&part).map_err(|e| e.to_string())?;
+        let (mut buf, mut done, mut last) = (vec![0u8; 64 * 1024], 0u64, std::time::Instant::now());
+        loop {
+            let n = r.read(&mut buf).map_err(|e| format!("the download was interrupted: {e}"))?;
+            if n == 0 {
+                break;
+            }
+            io::Write::write_all(&mut f, &buf[..n]).map_err(|e| e.to_string())?;
+            done += n as u64;
+            if last.elapsed() >= Duration::from_millis(100) {
+                progress_set(id, "Downloading", done, total); // about ten updates a second is plenty
+                last = std::time::Instant::now();
+            }
+        }
+        Ok(done)
+    })();
+    let done = match copied {
+        Ok(d) if total == 0 || d == total => d,
+        Ok(d) => {
+            let _ = fs::remove_file(&part);
+            return Err(format!("the download stopped early ({d} of {total} bytes)"));
+        }
+        Err(e) => {
+            let _ = fs::remove_file(&part);
+            return Err(e);
+        }
+    };
+    progress_set(id, "Downloading", done, total.max(done));
+    fs::rename(&part, to).map_err(|e| e.to_string())
+}
+
 /// Extract `zip_path` into `dest`, dropping the archive's top folder `strip_prefix`. Refuses unsafe paths.
 pub fn unpack_to(zip_path: &Path, dest: &Path, strip_prefix: &str) -> Result<(), String> {
+    unpack_to_with(zip_path, dest, strip_prefix, &|_, _| {})
+}
+
+/// Like `unpack_to`, calling `on(files_done, files_total)` as it goes.
+pub fn unpack_to_with(zip_path: &Path, dest: &Path, strip_prefix: &str, on: &dyn Fn(u64, u64)) -> Result<(), String> {
     let mut z = zip::ZipArchive::new(fs::File::open(zip_path).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
     let auto;
     let strip_prefix = if strip_prefix == "*" {
@@ -538,7 +621,13 @@ pub fn unpack_to(zip_path: &Path, dest: &Path, strip_prefix: &str) -> Result<(),
     } else {
         strip_prefix
     };
+    let count = z.len() as u64;
+    let mut last = std::time::Instant::now();
     for i in 0..z.len() {
+        if last.elapsed() >= Duration::from_millis(100) {
+            on(i as u64, count);
+            last = std::time::Instant::now();
+        }
         let mut f = z.by_index(i).map_err(|e| e.to_string())?;
         // enclosed_name is None for absolute paths and ..: refuse the whole archive (zip-slip)
         let name = f.enclosed_name().ok_or_else(|| format!("unsafe path in archive: {}", f.name()))?;
@@ -602,8 +691,11 @@ pub fn install_from_zip(c: &Component, zip_path: &Path, root: &Path) -> Result<(
         // overlaying a new unpack on a live install would clobber data (MariaDB system tables)
         return Err(format!("{} is already installed", c.name));
     }
+    progress_set(&c.id, "Checking the download", 0, 0);
     verify_hash(c, zip_path)?;
+    progress_set(&c.id, "Unpacking", 0, 0);
     unpack(c, zip_path, root)?;
+    progress_set(&c.id, "Setting up", 0, 0);
     write_marker(&root.join(&c.extract_to), &c.version);
     if !root.join(&c.binary).exists() {
         // the publisher changed the archive layout: do not leave a half install that says "missing" forever
@@ -615,6 +707,7 @@ pub fn install_from_zip(c: &Component, zip_path: &Path, root: &Path) -> Result<(
 
 pub fn install(c: &Component, root: &Path) -> Result<(), String> {
     validate(c)?;
+    let _busy = Busy::new(&c.id, "Starting");
     for n in &c.needs {
         let need = component(n)?;
         if !root.join(&need.binary).exists() {
@@ -659,12 +752,7 @@ fn install_one(c: &Component, root: &Path) -> Result<(), String> {
     fs::create_dir_all(&tmp).map_err(|e| e.to_string())?;
     let part = tmp.join(format!("{}.zip.part", c.id));
     let zip = tmp.join(format!("{}.zip", c.id));
-    let result = (|| {
-        let resp = ureq::get(&c.url).set("User-Agent", "runqora/0.1").call().map_err(|e| format!("{}: {e}", c.url))?;
-        io::copy(&mut resp.into_reader(), &mut fs::File::create(&part).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
-        fs::rename(&part, &zip).map_err(|e| e.to_string())?;
-        install_from_zip(c, &zip, root)
-    })();
+    let result = download_to(&c.id, &c.url, &zip).and_then(|_| install_from_zip(c, &zip, root));
     let _ = fs::remove_file(&part);
     let _ = fs::remove_file(&zip); // bad or used, never reuse a download
     result
@@ -727,13 +815,24 @@ pub mod win {
 
     /// A text value under HKEY_CURRENT_USER.
     pub fn reg_get_string(subkey: &str, name: &str) -> Option<String> {
-        use windows_sys::Win32::System::Registry::{RegGetValueW, HKEY_CURRENT_USER, RRF_RT_REG_SZ};
+        use windows_sys::Win32::System::Registry::HKEY_CURRENT_USER;
+        reg_get_text(HKEY_CURRENT_USER, subkey, name)
+    }
+
+    fn reg_get_text(hive: windows_sys::Win32::System::Registry::HKEY, subkey: &str, name: &str) -> Option<String> {
+        use windows_sys::Win32::System::Registry::{RegGetValueW, RRF_RT_REG_EXPAND_SZ, RRF_RT_REG_SZ};
         let (k, n) = (wide(subkey), wide(name));
-        let mut buf = vec![0u16; 1024];
+        let mut buf = vec![0u16; 2048];
         let mut size = (buf.len() * 2) as u32;
         // SAFETY: buf is valid for `size` bytes; the key and value names are NUL-terminated
-        let rc = unsafe { RegGetValueW(HKEY_CURRENT_USER, k.as_ptr(), n.as_ptr(), RRF_RT_REG_SZ, ptr::null_mut(), buf.as_mut_ptr().cast(), &mut size) };
+        let rc = unsafe { RegGetValueW(hive, k.as_ptr(), n.as_ptr(), RRF_RT_REG_SZ | RRF_RT_REG_EXPAND_SZ, ptr::null_mut(), buf.as_mut_ptr().cast(), &mut size) };
         (rc == 0).then(|| String::from_utf16_lossy(&buf[..(size as usize / 2).saturating_sub(1)]))
+    }
+
+    /// The command line a Windows service runs (its ImagePath). Anyone may read it.
+    pub fn service_image_path(name: &str) -> Option<String> {
+        use windows_sys::Win32::System::Registry::HKEY_LOCAL_MACHINE;
+        reg_get_text(HKEY_LOCAL_MACHINE, &format!(r"SYSTEM\CurrentControlSet\Services\{name}"), "ImagePath")
     }
 
     pub fn reg_set_string(subkey: &str, name: &str, value: &str) -> Result<(), u32> {
@@ -898,6 +997,29 @@ pub mod win {
 
 // ---- process control ----
 
+/// Is the Windows service of `c` registered AND does it run a program inside THIS install folder? Service names are
+/// machine-wide, so a second Runqora folder (or a test copy) must not start, stop or remove the first one's service.
+pub fn service_is_ours(c: &Component, root: &Path) -> bool {
+    let Some(sv) = &c.service else { return false };
+    if !win::service_exists(&sv.name) {
+        return false;
+    }
+    match win::service_image_path(&sv.name) {
+        Some(image) => path_inside(&image, root),
+        None => true, // cannot tell: behave as before
+    }
+}
+
+/// Does a service command line such as `"C:\Runqora\apache\bin\httpd.exe" -k runservice` point into `root`?
+pub fn path_inside(command: &str, root: &Path) -> bool {
+    let norm = |t: &str| t.replace('/', "\\").replace('"', "").to_lowercase();
+    let mut r = norm(&root.to_string_lossy());
+    if !r.ends_with('\\') {
+        r.push('\\');
+    }
+    norm(command).contains(&r)
+}
+
 #[cfg(test)] // only the smoke tests ask "is it free"; the app reads the listener table directly
 pub fn port_in_use(port: u16) -> bool {
     win::listener_pid(port).is_some()
@@ -958,7 +1080,7 @@ pub fn state(c: &Component, root: &Path) -> State {
         server,
         has_admin: c.admin_url.is_some(),
         can_service: c.service.is_some() && status != "missing",
-        service_installed: c.service.as_ref().is_some_and(|s| win::service_exists(&s.name)),
+        service_installed: service_is_ours(c, root),
         autostart: false, // all_states fills it from settings
 
         blocker: listener.map(|p| describe_blocker(p, root)),
@@ -1064,7 +1186,7 @@ pub fn stop(c: &Component, root: &Path) -> Result<String, String> {
     let Some(pid) = state(c, root).pid else {
         return Ok(format!("{} is not running", c.name));
     };
-    match c.service.as_ref().filter(|sv| win::service_exists(&sv.name)) {
+    match c.service.as_ref().filter(|_| service_is_ours(c, root)) {
         // a service runs as SYSTEM: ask the service manager, not the process
         Some(sv) => {
             win::run_elevated("net", &format!("stop {}", sv.name))?;
@@ -1101,7 +1223,11 @@ pub fn service_install(c: &Component, root: &Path) -> Result<String, String> {
         return Err(format!("{} is not installed", c.name));
     }
     if win::service_exists(&sv.name) {
-        return Ok(format!("{} is already installed as service {}", c.name, sv.name));
+        return if service_is_ours(c, root) {
+            Ok(format!("{} is already installed as service {}", c.name, sv.name))
+        } else {
+            Err(format!("another Runqora install already owns the Windows service {}; remove it there first", sv.name))
+        };
     }
     let exe = root.join(&c.binary);
     match win::run_elevated(&exe.to_string_lossy(), &service_params(sv, &sv.install, root))? {
@@ -1112,8 +1238,8 @@ pub fn service_install(c: &Component, root: &Path) -> Result<String, String> {
 
 pub fn service_remove(c: &Component, root: &Path) -> Result<String, String> {
     let sv = c.service.as_ref().ok_or_else(|| format!("{} cannot run as a service", c.name))?;
-    if !win::service_exists(&sv.name) {
-        return Ok(format!("service {} is not installed", sv.name));
+    if !service_is_ours(c, root) {
+        return Ok(format!("service {} is not installed for this folder", sv.name));
     }
     if state(c, root).status == "running" {
         return Err(format!("stop {} first, then remove the service", c.name));
@@ -1163,7 +1289,7 @@ pub struct Settings {
     /// start this server when Runqora opens
     #[serde(default)]
     pub autostart: BTreeMap<String, bool>,
-    /// "off" | "notify" | "install"; empty means notify
+    /// "off" | "notify" | "install"; empty means install (patch updates only)
     #[serde(default)]
     pub auto_update: String,
     /// unix seconds of the last automatic check
@@ -1643,6 +1769,19 @@ smtp_port = 1025
     }
 
     #[test]
+    fn a_service_belongs_to_the_install_folder_it_runs_from() {
+        let mine = Path::new(r"C:\Runqora");
+        assert!(path_inside(r#""C:\Runqora\apache\bin\httpd.exe" -k runservice"#, mine));
+        assert!(path_inside(r#""c:/runqora/mariadb/bin/mysqld.exe" --defaults-file="c:/runqora/mariadb/my.ini""#, mine), "slashes and case do not matter");
+        assert!(!path_inside(r#""C:\Runqora\apache\bin\httpd.exe" -k runservice"#, Path::new(r"C:\Users\x\AppData\Local\Temp\rt-smoke")), "another install's service is not ours");
+        assert!(!path_inside(r#""C:\Runqora2\apache\bin\httpd.exe""#, mine), "a folder that merely starts with the same letters is not inside it");
+        // a service that is not registered is never ours; EventLog is registered but is not Runqora's
+        let apache = comp("apache");
+        assert!(!service_is_ours(&Component { service: Some(ServiceSpec { name: "RunqoraNoSuchService".into(), install: vec![], remove: vec![] }), ..apache.clone() }, mine));
+        assert!(!service_is_ours(&Component { service: Some(ServiceSpec { name: "EventLog".into(), install: vec![], remove: vec![] }), ..apache }, mine));
+    }
+
+    #[test]
     fn manifest_is_valid() {
         let m = manifest();
         let ids: Vec<_> = m.components.iter().map(|c| c.id.as_str()).collect();
@@ -1827,9 +1966,14 @@ smtp_port = 1025
         // installed: the config follows; back to the default clears the override
         fs::create_dir_all(d.join("apache/conf")).unwrap();
         fs::write(d.join("apache/conf/httpd.conf"), "Listen 80\nServerName localhost:80\n").unwrap();
-        set_port_in(&d, "apache", apache_default as u32).unwrap();
-        assert!(settings_in(&d).ports.is_empty());
-        assert!(fs::read_to_string(d.join("apache/conf/httpd.conf")).unwrap().contains(&format!("Listen {apache_default}")));
+        // (only when the default port is free on this machine: a web server already on port 80 rightly blocks the switch)
+        if win::listener_pid(apache_default).is_none() {
+            set_port_in(&d, "apache", apache_default as u32).unwrap();
+            assert!(settings_in(&d).ports.is_empty());
+            assert!(fs::read_to_string(d.join("apache/conf/httpd.conf")).unwrap().contains(&format!("Listen {apache_default}")));
+        } else {
+            assert!(set_port_in(&d, "apache", apache_default as u32).unwrap_err().contains("already used by"));
+        }
         // pure text helpers are idempotent
         let ini = "[client]\nport=3306\n[mysqld]\nport=3306\nbind-address=127.0.0.1\n";
         let once = replace_port_lines(ini, 3399);

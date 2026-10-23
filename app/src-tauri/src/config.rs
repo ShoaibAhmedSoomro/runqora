@@ -34,7 +34,7 @@ const D: Def = Def { module: "", key: "", label: "", help: "", kind: "text", cho
 
 const DEFS: &[Def] = &[
     Def { module: "general", key: "editor", label: "Editor", help: "The program that opens configuration files and logs.", kind: "text", default: "notepad.exe", group: "General", ..D },
-    Def { module: "general", key: "auto_update", label: "Update automatically", help: "Patch updates install themselves only while the servers are stopped; bigger upgrades always ask first.", kind: "choice", choices: &[("off", "Off"), ("notify", "Tell me about updates"), ("install", "Install patch updates automatically")], default: "notify", group: "Updates", ..D },
+    Def { module: "general", key: "auto_update", label: "Update automatically", help: "Checks every module and Runqora itself once a day. Patch updates install themselves while the servers are stopped; bigger upgrades and new Runqora versions always ask first.", kind: "choice", choices: &[("install", "Check everything and install patch updates"), ("notify", "Check everything and tell me"), ("off", "Do not check")], default: "install", group: "Updates", ..D },
     Def { module: "general", key: "launch_at_login", label: "Start Runqora when I sign in", help: "Opens Runqora hidden in the tray when you sign in to Windows. Servers marked Start with Runqora then start by themselves.", kind: "bool", default: "off", group: "Startup", ..D },
     Def { module: "general", key: "theme", label: "Theme", help: "Light, dark, or follow the Windows setting as it changes.", kind: "choice", choices: &[("system", "Match Windows"), ("light", "Light"), ("dark", "Dark")], default: "system", group: "Appearance", ..D },
     Def { module: "general", key: "accent_mode", label: "Accent colour", help: "Buttons, switches and highlights. Match Windows follows your personalisation colour live.", kind: "choice", choices: &[("system", "Match Windows"), ("custom", "Choose a colour")], default: "system", group: "Appearance", ..D },
@@ -260,7 +260,7 @@ fn read_value(root: &Path, module: &str, key: &str) -> Option<String> {
     let s = settings_in(root);
     match (module, key) {
         ("general", "editor") => Some(if s.editor.is_empty() { "notepad.exe".into() } else { s.editor }),
-        ("general", "auto_update") => Some(if s.auto_update.is_empty() { "notify".into() } else { s.auto_update }),
+        ("general", "auto_update") => Some(if s.auto_update.is_empty() { "install".into() } else { s.auto_update }),
         ("general", "launch_at_login") => Some(on_off(crate::launch_at_login())),
         ("general", k @ ("theme" | "accent_mode" | "accent_color")) => s.custom.get(&format!("general.{k}")).cloned(),
         (m, "port") => component_with(m, &s).ok().map(|c| c.port.to_string()),

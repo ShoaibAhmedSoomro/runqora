@@ -108,6 +108,9 @@ fn a_moved_install_is_found_and_repaired() {
 #[test]
 fn stale_process_files_and_a_missing_ini_are_cleaned_up() {
     let r = root("rt-fix-stale");
+    // a port of its own: whatever web server the developer's PC runs on 80 must not turn "stale" into "blocked"
+    let free = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+    fs::write(r.join("settings.json"), format!(r#"{{"ports":{{"apache":{free}}}}}"#)).unwrap();
     fs::write(r.join("apache/logs/httpd.pid"), "999999").unwrap(); // no such process
     fs::write(r.join("php/php.ini-development"), ";extension=mysqli\n; extension_dir = \"ext\"\n").unwrap();
     let ids: Vec<String> = diagnose(&r).into_iter().map(|p| p.id).collect();

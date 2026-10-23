@@ -111,7 +111,7 @@ pub fn detect_version(c: &Component, root: &Path) -> Option<String> {
     if !bin.exists() {
         return None;
     }
-    let after = |text: &str, marker: &str| text.split_once(marker).map(|(_, r)| parse_ver(r)).filter(|v| !v.is_empty()).map(|v| v.iter().map(u32::to_string).collect::<Vec<_>>().join("."));
+    let after = |text: &str, marker: &str| version_after(text, marker);
     let dir = root.join(&c.extract_to);
     // the newer modules: what Runqora itself installed is the most reliable record; the program is the fallback
     if matches!(c.id.as_str(), "jre" | "tomcat" | "mailpit" | "sftpgo" | "wordpress" | "node" | "composer" | "adminer") {
@@ -125,7 +125,8 @@ pub fn detect_version(c: &Component, root: &Path) -> Option<String> {
     }
     match c.id.as_str() {
         "apache" => after(&run_capture(&bin, &["-v"])?, "Apache/"),
-        "php" => after(&run_capture(&bin, &["-v"])?, "PHP "),
+        // -n: without php.ini. A settings file written for another PHP prints "PHP Warning: ..." first, which is not the version.
+        "php" => after(&run_capture(&bin, &["-n", "-v"])?, "PHP "),
         "mariadb" => after(&run_capture(&bin, &["--version"])?, "Ver "),
         "phpmyadmin" => {
             let t = fs::read_to_string(root.join(&c.extract_to).join("libraries/classes/Version.php")).ok()?;
@@ -133,6 +134,16 @@ pub fn detect_version(c: &Component, root: &Path) -> Option<String> {
         }
         _ => None,
     }
+}
+
+/// The first run of digits and dots that follows `marker` where it is a version ("PHP 8.5.12", but not "PHP Warning:").
+/// An empty marker means "the text starts with the version".
+pub fn version_after(text: &str, marker: &str) -> Option<String> {
+    let dotted = |r: &str| Some(parse_ver(r)).filter(|v| !v.is_empty()).map(|v| v.iter().map(u32::to_string).collect::<Vec<_>>().join("."));
+    if marker.is_empty() {
+        return dotted(text);
+    }
+    text.split(marker).skip(1).find_map(dotted)
 }
 
 /// Visual Studio toolchain of the installed Apache Lounge build (17, 18...).
@@ -739,9 +750,16 @@ pub fn verify_install(c: &Component, root: &Path, want: &str) -> Result<Vec<Stri
             }
         }
         "php" => {
-            let out = run_capture(&root.join(&c.binary), &["-v"]).unwrap_or_default();
-            if out.contains("Warning") || out.contains("Unable to load") {
-                return Err(format!("PHP reports a problem on startup: {}", out.lines().next().unwrap_or("")));
+            let bin = root.join(&c.binary);
+            let out = run_capture(&bin, &["-v"]).unwrap_or_default();
+            if php_startup_problem(&out) {
+                // a new PHP line (8.3 -> 8.5) cannot use the old settings file as it is: its extensions were built for another PHP
+                let moved = refresh_php_ini(root)?;
+                let again = run_capture(&bin, &["-v"]).unwrap_or_default();
+                if php_startup_problem(&again) {
+                    return Err(format!("PHP still reports a problem on startup after rebuilding its settings: {}", again.lines().next().unwrap_or("")));
+                }
+                warnings.push(format!("PHP's settings file was rebuilt for this version and your settings were carried over ({} kept as php.ini.old).{}", "the previous file", if moved.is_empty() { String::new() } else { format!(" Not carried over: {}.", moved.join(", ")) }));
             }
         }
         "mariadb" => {
@@ -759,6 +777,42 @@ pub fn verify_install(c: &Component, root: &Path, want: &str) -> Result<Vec<Stri
     Ok(warnings)
 }
 
+/// Did `php -v` complain while starting up? Windows returns normal output and error output in two pieces, so the notices
+/// can come before AND after the version banner: every line is checked.
+pub fn php_startup_problem(out: &str) -> bool {
+    out.lines().map(str::trim_start).any(|l| {
+        ["PHP Warning", "PHP Fatal", "PHP Deprecated", "PHP Notice", "Warning:", "Fatal error", "Deprecated:", "Notice:"].iter().any(|p| l.starts_with(p)) || l.contains("PHP Startup") || l.contains("Unable to load dynamic library")
+    })
+}
+
+/// Build a fresh php.ini from the new PHP's own template and put the user's changed settings back into it.
+/// The old file is kept as php.ini.old. Returns the settings that could not be carried over.
+pub fn refresh_php_ini(root: &Path) -> Result<Vec<String>, String> {
+    let dir = root.join("php");
+    let ini = dir.join("php.ini");
+    let fields = crate::config::config_get(root, "php").unwrap_or_default();
+    // every extension switch is carried over (the new template turns a standard set on, so "off" must be re-applied too);
+    // other settings only when the user changed them from the default
+    let changed: Vec<(String, String)> = fields.iter().filter(|f| f.key != "extension_dir" && (f.key.starts_with("ext.") || !f.value.eq_ignore_ascii_case(&f.default))).map(|f| (f.key.clone(), f.value.clone())).collect();
+    let template = fs::read_to_string(dir.join("php.ini-development")).map_err(|e| format!("the new PHP has no php.ini-development: {e}"))?;
+    let _ = fs::copy(&ini, dir.join("php.ini.old"));
+    fs::write(&ini, crate::configure_php_ini(&template, &dir)).map_err(|e| e.to_string())?;
+    let mut lost = vec![];
+    for (k, v) in changed {
+        if crate::config::config_set(root, "php", &k, &v, false).is_err() {
+            lost.push(k);
+        }
+    }
+    Ok(lost)
+}
+
+/// Things generated from what is installed must follow a swap: Apache's list of PHP libraries changes with the PHP build.
+fn refresh_dependents(c: &Component, root: &Path) {
+    if matches!(c.id.as_str(), "php" | "apache" | "phpmyadmin" | "adminer") {
+        let _ = crate::refresh_extra(root);
+    }
+}
+
 fn finish_msg(c: &Component, old: &str, new: &str, warnings: &[String]) -> String {
     let mut m = format!("{} updated to {new} (was {old}). The previous version is kept so you can roll back.", c.name);
     for w in warnings {
@@ -772,6 +826,7 @@ pub fn apply_from_zip(c: &Component, root: &Path, cand: &Candidate, zip: &Path, 
     if let Some(b) = blocked_reason(c, root) {
         return Err(b);
     }
+    crate::progress_set(&c.id, "Checking the download", 0, 0);
     check_hash(&cand.sha256, zip)?;
     let live = root.join(&c.extract_to);
     let old = detect_version(c, root).unwrap_or_else(|| c.version.clone());
@@ -780,23 +835,28 @@ pub fn apply_from_zip(c: &Component, root: &Path, cand: &Candidate, zip: &Path, 
     unpack_component(c, zip, &stage, &cand.strip_prefix)?;
     write_marker(&stage, &cand.version);
     let made = now();
+    crate::progress_set(&c.id, "Installing the new version", 0, 0);
     let dir = backups_dir(root, &c.id).join(made.to_string());
     let keep = keep_rules(&c.id, cand.kind);
     let data_copied = keep.iter().any(|(r, m)| *r == "data" && *m == Keep::Copy);
     swap_in(&live, &stage, &dir.join("tree"), &keep).inspect_err(|_| remove_any(&stage))?;
+    crate::progress_set(&c.id, "Checking the new version", 0, 0);
     match verify(c, root, &cand.version) {
         Ok(warnings) => {
             write_meta(&dir, &Meta { version: old.clone(), made, data_copied, role: "backup".into() })?;
             prune(root, &c.id);
+            refresh_dependents(c, root);
             Ok(finish_msg(c, &old, &cand.version, &warnings))
         }
         Err(e) => {
+            crate::progress_set(&c.id, "Putting the old version back", 0, 0);
             // put the old version back; the failed tree is discarded
             let failed = dir.join("failed");
             // a copied database still sits untouched in the old tree: do not overwrite it with whatever the failed version did to the copy
             let undo_keep: Vec<_> = keep.iter().filter(|(r, _)| !(*r == "data" && data_copied)).cloned().collect();
             let undo = swap_in(&live, &dir.join("tree"), &failed, &undo_keep);
             let _ = fs::remove_dir_all(&dir);
+            refresh_dependents(c, root);
             match undo {
                 Ok(()) => Err(format!("{} {} did not pass its checks ({e}). {old} was restored.", c.name, cand.version)),
                 Err(u) => Err(format!("{} {} did not pass its checks ({e}) and restoring {old} failed ({u}). Your previous files are in {}", c.name, cand.version, dir.display())),
@@ -805,15 +865,11 @@ pub fn apply_from_zip(c: &Component, root: &Path, cand: &Candidate, zip: &Path, 
     }
 }
 
-pub fn download(url: &str, to: &Path) -> Result<(), String> {
+pub fn download(id: &str, url: &str, to: &Path) -> Result<(), String> {
     if !host_allowed(url, HOSTS) {
         return Err(format!("refusing to download from {url}"));
     }
-    fs::create_dir_all(to.parent().ok_or("bad path")?).map_err(|e| e.to_string())?;
-    let part = to.with_extension("part");
-    let resp = ureq::AgentBuilder::new().timeout_connect(Duration::from_secs(20)).user_agent("runqora/0.1").build().get(url).call().map_err(|e| format!("{url}: {e}"))?;
-    std::io::copy(&mut resp.into_reader(), &mut fs::File::create(&part).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
-    fs::rename(&part, to).map_err(|e| e.to_string())
+    crate::download_to(id, url, to)
 }
 
 /// Look the version up afresh (the UI only names it), download, verify, install.
@@ -830,7 +886,8 @@ pub fn apply_update(id: &str, version: &str) -> Result<String, String> {
     let current = detect_version(&c, &root).unwrap_or_else(|| c.version.clone());
     let cand = candidates_for(&c, &root, &current, pma_json.as_deref())?.into_iter().find(|x| x.version == version).ok_or("that version is no longer offered; check for updates again")?;
     let zip = root.join("tmp").join(format!("{id}-{version}.zip"));
-    download(&cand.url, &zip)?;
+    let _busy = crate::Busy::new(id, "Looking up the download");
+    download(id, &cand.url, &zip)?;
     let r = apply_from_zip(&c, &root, &cand, &zip, &verify_install);
     let _ = fs::remove_file(&zip);
     r
@@ -841,6 +898,7 @@ pub fn rollback_with(c: &Component, root: &Path, verify: Verify) -> Result<Strin
     if let Some(b) = blocked_reason(c, root) {
         return Err(b);
     }
+    let _busy = crate::Busy::new(&c.id, "Going back to the previous version");
     let (dir, meta) = read_backups(root, &c.id).into_iter().rev().find(|(_, m)| m.role == "backup").ok_or("there is no previous version to go back to")?;
     let live = root.join(&c.extract_to);
     let current = detect_version(c, root).unwrap_or_else(|| c.version.clone());
@@ -854,6 +912,7 @@ pub fn rollback_with(c: &Component, root: &Path, verify: Verify) -> Result<Strin
             write_meta(&undone, &Meta { version: current.clone(), made, data_copied: false, role: "undone".into() })?;
             let _ = fs::remove_dir_all(&dir);
             prune(root, &c.id);
+            refresh_dependents(c, root);
             let note = if meta.data_copied { " Databases are back to how they were before that update." } else { "" };
             Ok(format!("{} rolled back to {} (was {current}).{note}{}", c.name, meta.version, w.iter().map(|x| format!(" {x}")).collect::<String>()))
         }
@@ -874,7 +933,7 @@ pub fn auto_mode() -> &'static str {
     match settings().auto_update.as_str() {
         "off" => "off",
         "install" => "install",
-        _ => "notify",
+        _ => "install", // checking everything and installing patch updates is the default; "off" and "notify" are opt-outs
     }
 }
 

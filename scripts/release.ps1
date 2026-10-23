@@ -46,7 +46,7 @@ Push-Location $tauri
 try {
   cargo build --release
   if ($LASTEXITCODE) { throw "cargo build failed" }
-  npx --yes "@tauri-apps/cli@2" build --bundles nsis
+  npx --yes "@tauri-apps/cli@2.12.4" build --bundles nsis
   if ($LASTEXITCODE) { throw "the installer build failed" }
 } finally { Pop-Location }
 

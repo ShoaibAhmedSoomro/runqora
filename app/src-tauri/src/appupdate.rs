@@ -65,7 +65,8 @@ pub fn install() -> Result<String, String> {
         return Err(e);
     }
     crate::progress_set("app", "Opening the installer", 0, 0);
-    Command::new(&file).spawn().map_err(|e| format!("could not start the installer: {e}"))?;
+    // /UPDATE: the installer replaces the files in place (no uninstall first, no questions) and keeps everything else
+    Command::new(&file).arg("/UPDATE").spawn().map_err(|e| format!("could not start the installer: {e}"))?;
     Ok(format!("The Runqora {} installer is open. Runqora closes now; finish the installer and it opens again.", u.latest))
 }
 

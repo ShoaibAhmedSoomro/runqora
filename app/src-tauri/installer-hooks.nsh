@@ -1,5 +1,17 @@
 ; Extra steps for the Runqora installer (Tauri NSIS hooks).
 
+; Record how this install happened (read by the tests, and handy when something goes wrong): "updated in place" when the
+; previous version was still registered at this point, i.e. it was NOT uninstalled first; "fresh" otherwise.
+!macro NSIS_HOOK_PREINSTALL
+  ReadRegStr $0 SHCTX "${UNINSTKEY}" "DisplayVersion"
+  StrCmp $0 "" rq_fresh
+  WriteRegStr HKCU "Software\Runqora" "LastInstall" "updated in place from $0"
+  Goto rq_recorded
+  rq_fresh:
+  WriteRegStr HKCU "Software\Runqora" "LastInstall" "fresh"
+  rq_recorded:
+!macroend
+
 ; After a fresh install, ask once whether Runqora should open (hidden, in the tray) when the user signs in to Windows.
 ; Silent installs never ask, and an update never asks again: the answer is remembered under HKCU\Software\Runqora.
 !macro NSIS_HOOK_POSTINSTALL

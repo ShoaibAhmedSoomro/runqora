@@ -70,6 +70,26 @@ pub fn install() -> Result<String, String> {
     Ok(format!("The Runqora {} installer is open. Runqora closes now; finish the installer and it opens again.", u.latest))
 }
 
+const REPO_API_INFO: &str = "https://api.github.com/repos/ShoaibAhmedSoomro/runqora";
+
+/// `stargazers_count` from GitHub's repository JSON.
+pub fn parse_stars(json: &str) -> Option<u64> {
+    serde_json::from_str::<serde_json::Value>(json).ok()?["stargazers_count"].as_u64()
+}
+
+/// How many people starred the project. Asked of GitHub at most once every 30 minutes, whatever number of windows ask.
+pub fn repo_stars() -> Result<u64, String> {
+    static CACHE: std::sync::Mutex<Option<(std::time::Instant, u64)>> = std::sync::Mutex::new(None);
+    if let Some((at, n)) = *CACHE.lock().unwrap_or_else(|e| e.into_inner()) {
+        if at.elapsed() < std::time::Duration::from_secs(30 * 60) {
+            return Ok(n);
+        }
+    }
+    let n = parse_stars(&http_get(REPO_API_INFO)?).ok_or("GitHub did not say how many stars there are")?;
+    *CACHE.lock().unwrap_or_else(|e| e.into_inner()) = Some((std::time::Instant::now(), n));
+    Ok(n)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -94,6 +114,14 @@ mod tests {
         assert!(parse_release(&release("v0.2.0", "https://github.com/someone-else/runqora/releases/download/v0.2.0/Runqora-Setup-x64.exe", "sha256:ab"), "0.1.0").is_none(), "another repository");
         assert!(parse_release(&release("v0.2.0", OK_URL, "md5:ab"), "0.1.0").is_none(), "no SHA-256 to check");
         assert!(parse_release("not json", "0.1.0").is_none() && parse_release(r#"{"tag_name":"v9.0.0","assets":[]}"#, "0.1.0").is_none(), "no installer attached");
+    }
+
+    #[test]
+    fn the_star_count_is_read_from_the_repository_json() {
+        assert_eq!(parse_stars(r#"{"id":1,"name":"runqora","stargazers_count":128,"forks":2}"#), Some(128));
+        assert_eq!(parse_stars(r#"{"stargazers_count":0}"#), Some(0));
+        assert_eq!(parse_stars(r#"{"message":"Not Found"}"#), None);
+        assert_eq!(parse_stars("<html>"), None);
     }
 
     /// The real project release, read from GitHub (needs the internet).

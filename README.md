@@ -52,7 +52,8 @@
 
 **Windows 11 look and feel**
 - Fluent design with Mica, light and dark themes that follow Windows, and an accent colour that follows yours
-- Responsive layout that fills the window at any size
+- Responsive layout that fills the window at any size, including the About page, which turns into columns on wide screens
+- A star-on-GitHub button (with the live star count) and the developer's links live in the sidebar
 - Lives in the system tray like XAMPP's control panel: closing the window keeps Runqora running, and the tray menu has a submenu per server (status dot, Start/Stop, Open, Settings, config files and logs), Start all, Stop all and Quit
 - Updating Runqora installs over the old version in place (nothing is uninstalled first; your settings, servers and databases are untouched)
 - Start with Windows: the installer asks once, and it is a switch in Settings and a tick in the tray menu. It opens hidden in the tray; a second launch just brings the running copy forward

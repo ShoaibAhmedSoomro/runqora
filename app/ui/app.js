@@ -67,7 +67,7 @@ const NOTE = {
 const STATUS = { missing: "Not installed", installed: "Installed", stopped: "Stopped", running: "Running", blocked: "Port in use" };
 const G = { play: 0xe768, stop: 0xe71a, globe: 0xe774, page: 0xe7c3, down: 0xe70d, download: 0xe896, ok: 0xe930, err: 0xea39, warn: 0xe7ba, info: 0xe946, close: 0xe711, folder: 0xe8b7, sync: 0xe895, back: 0xe7a7, link: 0xe71b };
 
-const view = { progress: {}, appUpdate: null, appVersion: "", modules: [], externals: [], sites: [], loaded: false, entered: false, updEntered: false, updates: null, checking: false, checkedAt: null, autoMode: "notify", settingsTab: "general", problems: 0, page: "modules", open: new Set(), busy: new Map(), log: [], bars: [], errors: 0, json: "" };
+const view = { stars: null, progress: {}, appUpdate: null, appVersion: "", modules: [], externals: [], sites: [], loaded: false, entered: false, updEntered: false, updates: null, checking: false, checkedAt: null, autoMode: "notify", settingsTab: "general", problems: 0, page: "modules", open: new Set(), busy: new Map(), log: [], bars: [], errors: 0, json: "" };
 
 // ---- progress: what a download or update is doing, shown on the card that started it ----
 const MB = (n) => (n / 1048576).toFixed(n < 10485760 ? 1 : 0);
@@ -380,23 +380,55 @@ function paintLog() {
 
 // ---- about page ----
 const DEV = [["github", "GitHub", "https://github.com/ShoaibAhmedSoomro"], ["linkedin", "LinkedIn", "https://www.linkedin.com/in/shoaibaofficial/"], ["instagram", "Instagram", "https://www.instagram.com/shoaib_ahmedsoomro"], ["facebook", "Facebook", "https://www.facebook.com/shoaibahmedsoomroofficial/"]];
+const REPO = ["repo", "Runqora on GitHub", "https://github.com/ShoaibAhmedSoomro/runqora"];
+const openDev = (id, name = "Link") => invoke("open_developer", { id }).catch((e) => note("error", name, String(e)));
+const starLabel = () => h("span", { class: "star-count", data: { stars: "" } }, view.stars == null ? "" : String(view.stars));
+/** The star count appears wherever there is a star widget; filled in as soon as GitHub has answered. */
+function paintStars() {
+  for (const el of document.querySelectorAll("[data-stars]")) el.textContent = view.stars == null ? "" : String(view.stars);
+}
+async function loadStars() {
+  try { const n = await invoke("repo_stars"); if (n != null) { view.stars = n; paintStars(); } } catch {}
+}
+
+/** The sidebar: a star button and the developer, with his links. Hidden by CSS on narrow or short windows. */
+function paintSidebar() {
+  $("#nav-widget").replaceChildren(
+    h("button", { class: "star-btn", title: "Star Runqora on GitHub", on: { click: () => openDev("repo", "GitHub") } }, icon(0xe735), h("span", {}, "Star on GitHub"), starLabel()),
+    h("div", { class: "dev" }, h("span", { class: "avatar", "aria-hidden": "true" }, "SA"), h("div", { class: "who" }, h("div", { class: "strong small" }, "Shoaib Ahmed Soomro"), h("div", { class: "muted small" }, "Developer of Runqora"))),
+    h("div", { class: "dev-links" }, DEV.map(([id, name, url]) => h("button", { class: "btn ghost sm", title: name, "aria-label": `${name}: ${url}`, on: { click: () => openDev(id, name) } }, logo(id, 16)))),
+  );
+}
+$("#star-top").addEventListener("click", () => openDev("repo", "GitHub"));
+$("#star-nav").addEventListener("click", () => openDev("repo", "GitHub"));
+
 async function paintAbout() {
   const info = await invoke("app_info").catch(() => ({ version: "", root: "" }));
   $("#about").replaceChildren(
-    h("div", { class: "card hero" }, h("img", { class: "app-logo", src: "logos/runqora.svg", alt: "" }), h("div", {}, h("div", { class: "strong big" }, "Runqora"), h("div", { class: "muted" }, `Version ${info.version}`))),
-    h("div", { class: "card" },
-      h("div", { class: "row plain" }, h("div", { class: "label" }, h("div", { class: "strong" }, "Install folder"), h("div", { class: "muted small", style: "user-select:text" }, info.root)), h("button", { class: "btn sm", on: { click: () => invoke("open_root") } }, icon(G.folder), "Open folder")),
-      info.cli && h("div", { class: "row plain" }, h("div", { class: "label" }, h("div", { class: "strong" }, "Command line"), h("div", { class: "muted small", style: "user-select:text" }, `${info.cli} status | start | stop | ports`))),
-    ),
-    h("div", { class: "group" }, "Developer"),
-    h("div", { class: "card" }, DEV.map(([id, name, url]) => h("div", { class: "row plain" },
-      h("div", { class: "with-logo" }, logo(id, 20), h("div", { class: "label" }, h("div", { class: "strong" }, name), h("div", { class: "muted small path-line", title: url }, url.replace(/^https:\/\/(www\.)?/, "")))),
-      h("button", { class: "btn sm", "aria-label": `Open ${name}`, on: { click: () => invoke("open_developer", { id }).catch((e) => note("error", name, String(e))) } }, icon(G.link), "Open")))),
-    h("div", { class: "card" }, view.modules.map((m) => h("div", { class: "row plain" }, h("div", { class: "with-logo" }, logo(m.id, 20), h("div", { class: "strong" }, m.name)), h("div", { class: "value muted" }, `${m.version} · ${STATUS[m.status]}`)))),
-    h("p", { class: "muted small fine" }, "Apache, Tomcat, PHP, MariaDB, phpMyAdmin, WordPress, FileZilla, Mailpit, SFTPGo, Java, GitHub, LinkedIn, Instagram and Facebook names and logos belong to their projects and are shown only to identify the programs. Runqora is not affiliated with them."),
+    h("div", { class: "card about-hero span" },
+      h("img", { class: "app-logo", src: "logos/runqora.svg", alt: "" }),
+      h("div", { class: "meta" }, h("div", { class: "strong big" }, "Runqora"), h("div", { class: "muted" }, `Version ${info.version} · a local web stack for Windows`)),
+      h("div", { class: "cta" },
+        h("button", { class: "btn accent", on: { click: () => openDev("repo", "GitHub") } }, icon(0xe735), "Star on GitHub", starLabel()),
+        h("button", { class: "btn", on: { click: () => goto("updates") } }, icon(G.sync), "Check for updates"),
+        h("button", { class: "btn", on: { click: () => invoke("open_notes", { url: "https://github.com/ShoaibAhmedSoomro/runqora/releases" }).catch((e) => note("error", "", String(e))) } }, icon(G.link), "Release notes"))),
+    h("div", { class: "about-col" },
+      h("div", { class: "group" }, "This install"),
+      h("div", { class: "card" },
+        h("div", { class: "row plain" }, h("div", { class: "label" }, h("div", { class: "strong" }, "Install folder"), h("div", { class: "muted small", style: "user-select:text;overflow-wrap:anywhere" }, info.root)), h("button", { class: "btn sm", on: { click: () => invoke("open_root") } }, icon(G.folder), "Open folder")),
+        info.cli && h("div", { class: "row plain" }, h("div", { class: "label" }, h("div", { class: "strong" }, "Command line"), h("div", { class: "muted small", style: "user-select:text;overflow-wrap:anywhere" }, `${info.cli} status | start | stop | open | ports`))))),
+    h("div", { class: "about-col" },
+      h("div", { class: "group" }, "Developer"),
+      h("div", { class: "card" }, DEV.map(([id, name, url]) => h("div", { class: "row plain" },
+        h("div", { class: "with-logo" }, logo(id, 20), h("div", { class: "label" }, h("div", { class: "strong" }, name), h("div", { class: "muted small path-line", title: url }, url.replace(/^https:\/\/(www\.)?/, "")))),
+        h("button", { class: "btn sm", "aria-label": `Open ${name}`, on: { click: () => openDev(id, name) } }, icon(G.link), "Open"))))),
+    h("div", { class: "about-col span" },
+      h("div", { class: "group" }, "Programs"),
+      h("div", { class: "card about-mods" }, view.modules.map((m) => h("div", { class: "row plain" }, h("div", { class: "with-logo" }, logo(m.id, 20), h("div", { class: "strong" }, m.name)), h("div", { class: "value muted" }, `${m.version} · ${STATUS[m.status]}`))))),
+    h("p", { class: "muted small fine span" }, "Apache, Tomcat, PHP, MariaDB, phpMyAdmin, WordPress, FileZilla, Mailpit, SFTPGo, Java, GitHub, LinkedIn, Instagram and Facebook names and logos belong to their owners and are shown only to identify the programs. Runqora is not affiliated with them."),
   );
+  paintStars();
 }
-
 // ---- ports page (netstat with names) ----
 let portRows = [];
 async function loadPorts() {
@@ -913,6 +945,9 @@ window.__TAURI__?.event?.listen("navigate", (e) => {
   if (["modules", "sites", "updates", "ports", "activity", "settings", "about"].includes(page)) goto(page);
 });
 invoke("ui_ready").catch(() => {}); // the window is shown once the page is ready
+paintSidebar();
+loadStars();
+setInterval(loadStars, 30 * 60 * 1000);
 paintNav();
 paintLog();
 paintModules();

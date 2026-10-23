@@ -243,6 +243,7 @@ fn external_get(id: String) -> Result<(), String> {
 
 /// The developer's own pages. The UI sends only a key; the address comes from this list.
 const DEVELOPER: &[(&str, &str)] = &[
+    ("repo", "https://github.com/ShoaibAhmedSoomro/runqora"),
     ("github", "https://github.com/ShoaibAhmedSoomro"),
     ("linkedin", "https://www.linkedin.com/in/shoaibaofficial/"),
     ("instagram", "https://www.instagram.com/shoaib_ahmedsoomro"),
@@ -275,6 +276,12 @@ fn ui_ready(app: tauri::AppHandle) {
     if FIRST.swap(false, Ordering::Relaxed) && !std::env::args().any(|a| a == "--hidden") {
         tray::show_window(&app);
     }
+}
+
+/// How many stars the project has on GitHub (None when offline: the widget then just says "Star").
+#[tauri::command]
+async fn repo_stars() -> Option<u64> {
+    blocking(rt::appupdate::repo_stars).await.ok()
 }
 
 /// Is there a newer Runqora release on GitHub?
@@ -469,7 +476,7 @@ fn main() {
             modules_status, module_launch, open_module_folder, module_start, module_stop, component_install, module_admin, module_service, module_open_file, modules_all, ports_scan, take_notes,
             settings_get, settings_set_editor, settings_set_port, settings_set_autostart, settings_set_auto_update, app_info, open_root,
             updates_check, update_apply, update_rollback, open_notes, fx_enabled,
-            ui_ready, progress, app_update_check, app_update_install, developer_links, open_developer, sites_list, site_add, site_remove, site_open_folder, wordpress_create, externals_status, external_start, external_stop, external_open, external_get, appearance, apply_theme, open_url, https_status, https_trust, https_untrust, https_regenerate, config_get, config_set, module_restart, config_export, config_import, config_ini_text, setup_check, setup_fix, setup_fix_all, port_remedy, port_end, port_stop_service, port_suggest
+            ui_ready, repo_stars, progress, app_update_check, app_update_install, developer_links, open_developer, sites_list, site_add, site_remove, site_open_folder, wordpress_create, externals_status, external_start, external_stop, external_open, external_get, appearance, apply_theme, open_url, https_status, https_trust, https_untrust, https_regenerate, config_get, config_set, module_restart, config_export, config_import, config_ini_text, setup_check, setup_fix, setup_fix_all, port_remedy, port_end, port_stop_service, port_suggest
         ])
         .setup(|app| {
             let handle = app.handle().clone();

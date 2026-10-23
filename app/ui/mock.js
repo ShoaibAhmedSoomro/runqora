@@ -112,6 +112,7 @@ if (!window.__TAURI__) {
       case "https_untrust": httpsTrusted = false; return "This PC no longer trusts your Runqora certificate.";
       case "https_regenerate": httpsTrusted = false; return {};
       case "open_url": case "open_developer": case "ui_ready": return null;
+      case "repo_stars": return 4;
       case "app_update_check": return location.hash.includes("uptodate") || location.hash.includes("demo") ? null : { current: "0.1.0", latest: "0.2.0", notes_url: "https://github.com/ShoaibAhmedSoomro/runqora/releases/tag/v0.2.0", published: "2026-11-01T10:00:00Z", body: "Update checks for every module.\nNew: Node.js, Composer and Adminer." };
       case "app_update_install": return "The Runqora 0.2.0 installer is open. Runqora closes now; finish the installer and it opens again.";
       case "sites_list": return JSON.parse(JSON.stringify(sites));

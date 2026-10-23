@@ -67,7 +67,38 @@ const NOTE = {
 const STATUS = { missing: "Not installed", installed: "Installed", stopped: "Stopped", running: "Running", blocked: "Port in use" };
 const G = { play: 0xe768, stop: 0xe71a, globe: 0xe774, page: 0xe7c3, down: 0xe70d, download: 0xe896, ok: 0xe930, err: 0xea39, warn: 0xe7ba, info: 0xe946, close: 0xe711, folder: 0xe8b7, sync: 0xe895, back: 0xe7a7, link: 0xe71b };
 
-const view = { appUpdate: null, appVersion: "", modules: [], externals: [], sites: [], loaded: false, entered: false, updEntered: false, updates: null, checking: false, checkedAt: null, autoMode: "notify", settingsTab: "general", problems: 0, page: "modules", open: new Set(), busy: new Map(), log: [], bars: [], errors: 0, json: "" };
+const view = { progress: {}, appUpdate: null, appVersion: "", modules: [], externals: [], sites: [], loaded: false, entered: false, updEntered: false, updates: null, checking: false, checkedAt: null, autoMode: "notify", settingsTab: "general", problems: 0, page: "modules", open: new Set(), busy: new Map(), log: [], bars: [], errors: 0, json: "" };
+
+// ---- progress: what a download or update is doing, shown on the card that started it ----
+const MB = (n) => (n / 1048576).toFixed(n < 10485760 ? 1 : 0);
+function progressText(p, fallback) {
+  if (!p) return fallback;
+  const pct = p.total > 0 ? Math.min(100, Math.floor((p.done / p.total) * 100)) : null;
+  if (p.stage === "Downloading" && p.total > 0) return `Downloading ${MB(p.done)}/${MB(p.total)} MB · ${pct}%`;
+  if (p.stage === "Downloading") return `Downloading ${MB(p.done)} MB`;
+  return pct != null && pct < 100 ? `${p.stage} · ${pct}%` : `${p.stage}...`;
+}
+/** The text and the bar of every busy card, in place (no repaint, so nothing under the cursor moves). */
+function paintProgress() {
+  for (const el of document.querySelectorAll("[data-prog]")) {
+    const p = view.progress[el.dataset.prog];
+    el.textContent = progressText(p, el.dataset.label || "Working...");
+  }
+  for (const bar of document.querySelectorAll("[data-progbar]")) {
+    const p = view.progress[bar.dataset.progbar];
+    const known = p && p.total > 0;
+    bar.classList.toggle("ind", !known);
+    bar.firstElementChild.style.width = known ? `${Math.min(100, (p.done / p.total) * 100)}%` : "";
+    bar.setAttribute("aria-valuenow", known ? String(Math.floor((p.done / p.total) * 100)) : "");
+  }
+}
+const progressBar = (key) => h("div", { class: "progress ind", role: "progressbar", "aria-label": "Progress", "aria-valuemin": "0", "aria-valuemax": "100", data: { progbar: key } }, h("i"));
+const busyStatus = (key, label) => h("div", { class: "status", role: "status" }, h("span", { class: "ring" }), h("span", { class: "prog-text", data: { prog: key, label } }, label));
+setInterval(async () => {
+  if (!view.busy.size) return;
+  try { view.progress = await invoke("progress"); } catch { return; }
+  paintProgress();
+}, 350);
 
 // ---- appearance: theme and accent, synced with Windows ----
 const dark = matchMedia("(prefers-color-scheme: dark)");
@@ -147,7 +178,7 @@ function moduleCard(m, i) {
   const k = (a) => ({ key: `${m.id}:${a}` });
 
   const status = busy
-    ? h("div", { class: "status" }, h("span", { class: "ring" }), busy)
+    ? busyStatus(m.id, busy)
     : h("div", { class: `status ${m.status}` }, h("span", { class: "dot" }), STATUS[m.status] + (m.pid ? ` · PID ${m.pid}` : ""));
 
   const actions = h("div", { class: "actions" });
@@ -166,7 +197,8 @@ function moduleCard(m, i) {
   const head = h("div", { class: `module-head ${m.status}` },
     h("div", { class: "tile", "aria-hidden": "true" }, logo(m.id, 24)),
     h("div", { class: "titles" }, h("div", { class: "name" }, m.name), h("div", { class: "muted small" }, m.version + (m.server ? ` · Port ${m.port}` : ""))),
-    status, actions,
+    status, busy ? h("div", { class: "actions" }) : actions, // the buttons would only be disabled; the progress needs the room
+    busy && progressBar(m.id),
     hasBody && h("button", { class: "btn ghost chev", "aria-expanded": String(isOpen), "aria-label": `Details for ${m.name}`, data: k("expand"), on: { click: (e) => toggleBody(e.currentTarget, m.id) } }, icon(G.down)),
   );
 
@@ -214,6 +246,7 @@ function paintModules() {
   const key = document.activeElement?.dataset?.key;
   $("#modules").setAttribute("aria-busy", String(!view.loaded));
   $("#modules").replaceChildren(...(view.loaded ? view.modules.map(moduleCard) : [0, 1, 2, 3].map(skeleton)));
+  paintProgress();
   if (view.loaded && !view.entered) setTimeout(() => (view.entered = true), 900); // play the entrance once, not on every refresh
   if (key) $(`[data-key="${CSS.escape(key)}"]`)?.focus();
 }
@@ -629,8 +662,8 @@ function paintConfigFile(body) {
 const KIND = { patch: "Update", minor: "Minor upgrade", major: "Major upgrade", toolchain: "New build" };
 const MODE_TEXT = {
   off: "Runqora will not look for updates by itself.",
-  notify: "Runqora tells you when something newer is published. You decide what to install.",
-  install: "Patch updates install by themselves when the server is stopped. Minor and major upgrades always ask first.",
+  notify: "Runqora checks everything every day and tells you when something newer is published. You decide what to install.",
+  install: "Runqora checks every module and itself every day. Patch updates install by themselves while the server is stopped; bigger upgrades and new Runqora versions always ask first.",
 };
 const newest = (u) => u.candidates.filter((c) => c.kind === "patch").at(-1); // candidates arrive oldest to newest
 const hasNews = (u) => u.candidates.length > 0;
@@ -662,7 +695,7 @@ async function installApp(u) {
 
 function appUpdateCard() {
   const u = view.appUpdate, busy = view.busy.get("upd:app");
-  const status = busy ? h("div", { class: "status" }, h("span", { class: "ring" }), busy) : u ? h("div", { class: "status avail" }, h("span", { class: "dot" }), `Update available: ${u.latest}`) : h("div", { class: "status running" }, h("span", { class: "dot" }), "Up to date");
+  const status = busy ? busyStatus("app", busy) : u ? h("div", { class: "status avail" }, h("span", { class: "dot" }), `Update available: ${u.latest}`) : h("div", { class: "status running" }, h("span", { class: "dot" }), "Up to date");
   const actions = h("div", { class: "actions" }, u && h("button", { class: "btn accent", disabled: !!busy, data: { key: "upd:app:install" }, on: { click: () => installApp(u) } }, icon(G.download), "Update"));
   const inner = h("div", { class: "inner" });
   if (u) {
@@ -671,7 +704,7 @@ function appUpdateCard() {
   const head = h("div", { class: "module-head" },
     h("div", { class: "tile", "aria-hidden": "true" }, h("img", { class: "logo-img-mark", alt: "", src: "logos/runqora.svg", style: "--size:24px" })),
     h("div", { class: "titles" }, h("div", { class: "name" }, "Runqora"), h("div", { class: "muted small" }, `Installed ${u?.current || view.appVersion || ""} · this app`)),
-    status, actions);
+    status, busy ? h("div", { class: "actions" }) : actions, busy && progressBar("app"));
   return h("article", { class: "card", "aria-label": "Runqora" }, head, inner.children.length && h("div", { class: "module-body open" }, inner));
 }
 
@@ -751,7 +784,7 @@ function updateCard(u, i) {
   const others = u.candidates.filter((c) => c !== best);
   const busy = view.busy.get(`upd:${u.id}`);
   const k = (a) => ({ key: `upd:${u.id}:${a}` });
-  const status = busy ? h("div", { class: "status" }, h("span", { class: "ring" }), busy)
+  const status = busy ? busyStatus(u.id, busy)
     : u.error ? h("div", { class: "status blocked" }, h("span", { class: "dot" }), "Couldn't check")
     : best ? h("div", { class: "status avail" }, h("span", { class: "dot" }), `Update available: ${best.version}`)
     : h("div", { class: "status running" }, h("span", { class: "dot" }), others.length ? "Up to date · newer lines exist" : "Up to date");
@@ -776,7 +809,8 @@ function updateCard(u, i) {
   const head = h("div", { class: "module-head" },
     h("div", { class: "tile", "aria-hidden": "true" }, logo(u.id, 24)),
     h("div", { class: "titles" }, h("div", { class: "name" }, u.name), h("div", { class: "muted small" }, `Installed ${u.current}`)),
-    status, actions,
+    status, busy ? h("div", { class: "actions" }) : actions,
+    busy && progressBar(u.id),
     hasBody && h("button", { class: "btn ghost chev", "aria-expanded": String(isOpen), "aria-label": `Versions for ${u.name}`, data: k("expand"), on: { click: (e) => toggleBody(e.currentTarget, `upd:${u.id}`) } }, icon(G.down)));
   return h("article", { class: `card${view.updEntered ? "" : " enter"}`, style: `--i:${i}`, "aria-label": u.name }, head, h("div", { class: `module-body${isOpen ? " open" : ""}`, inert: !isOpen }, inner));
 }
@@ -796,7 +830,7 @@ function paintUpdates() {
     try { note("success", "", await invoke("settings_set_auto_update", { mode: e.target.value })); } catch (err) { note("error", "Couldn't save that.", String(err)); }
     paintUpdates();
   } } },
-    ...[["off", "Off"], ["notify", "Tell me about updates"], ["install", "Install patch updates automatically"]].map(([v, t]) => h("option", { value: v, selected: v === view.autoMode }, t)));
+    ...[["install", "Check everything and install patch updates"], ["notify", "Check everything and tell me"], ["off", "Do not check"]].map(([v, t]) => h("option", { value: v, selected: v === view.autoMode }, t)));
   const list = !view.updates
     ? [0, 1, 2].map(skeleton)
     : view.updates.length ? view.updates.map(updateCard) : [h("div", { class: "card" }, h("div", { class: "empty" }, "Nothing is installed yet. Install a module on the Modules page first."))];
@@ -805,6 +839,7 @@ function paintUpdates() {
     appUpdateCard(),
     ...list,
   );
+  paintProgress();
   if (view.updates && !view.updEntered) setTimeout(() => (view.updEntered = true), 900);
   if (key) $(`[data-key="${CSS.escape(key)}"]`)?.focus();
 }
@@ -875,7 +910,7 @@ refreshProblems();
 loadAppearance();
 invoke("app_info").then((i) => (view.appVersion = i.version)).catch(() => {});
 invoke("settings_get").then((s) => {
-  view.autoMode = ["off", "notify", "install"].includes(s.auto_update) ? s.auto_update : "notify";
+  view.autoMode = ["off", "notify", "install"].includes(s.auto_update) ? s.auto_update : "install";
   if (view.autoMode !== "off") {
     setTimeout(checkUpdates, 3000); // quietly fills the badge on the Updates item
     // a release published while Runqora is open shows up here within half an hour, no restart needed

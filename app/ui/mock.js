@@ -37,13 +37,13 @@ if (!window.__TAURI__) {
     set("php", { status: "installed" });
   }
   const wait = (ms) => new Promise((r) => setTimeout(r, ms));
-  let autoMode = "notify";
+  let autoMode = "install";
   let httpsOn = location.hash.includes("https"), httpsTrusted = false;
   // ---- configuration forms (mirrors the core's catalogue closely enough to design against) ----
   const F = (module, key, label, help, kind, value, def, group, extra = {}) => ({ module, key, label, help, kind, choices: [], min: 0, max: 0, group, value, default: def, ...extra });
   const onOff = [["On", "On"], ["Off", "Off"]];
   const cfg = {
-    general: [F("general", "theme", "Theme", "Light, dark, or follow the Windows setting as it changes.", "choice", "system", "system", "Appearance", { choices: [["system", "Match Windows"], ["light", "Light"], ["dark", "Dark"]] }), F("general", "accent_mode", "Accent colour", "Buttons, switches and highlights. Match Windows follows your personalisation colour live.", "choice", "system", "system", "Appearance", { choices: [["system", "Match Windows"], ["custom", "Choose a colour"]] }), F("general", "accent_color", "Your colour", "Used when the accent is set to a custom colour. Text on it is kept readable automatically.", "color", "#0067C0", "#0067C0", "Appearance"), F("general", "launch_at_login", "Start Runqora when I sign in", "Opens Runqora hidden in the tray when you sign in to Windows. Servers marked Start with Runqora then start by themselves.", "bool", "off", "off", "Startup"), F("general", "editor", "Editor", "The program that opens configuration files and logs.", "text", "notepad.exe", "notepad.exe", "General"), F("general", "auto_update", "Update automatically", "Patch updates install themselves only while the servers are stopped.", "choice", "notify", "notify", "Updates", { choices: [["off", "Off"], ["notify", "Tell me about updates"], ["install", "Install patch updates automatically"]] })],
+    general: [F("general", "theme", "Theme", "Light, dark, or follow the Windows setting as it changes.", "choice", "system", "system", "Appearance", { choices: [["system", "Match Windows"], ["light", "Light"], ["dark", "Dark"]] }), F("general", "accent_mode", "Accent colour", "Buttons, switches and highlights. Match Windows follows your personalisation colour live.", "choice", "system", "system", "Appearance", { choices: [["system", "Match Windows"], ["custom", "Choose a colour"]] }), F("general", "accent_color", "Your colour", "Used when the accent is set to a custom colour. Text on it is kept readable automatically.", "color", "#0067C0", "#0067C0", "Appearance"), F("general", "launch_at_login", "Start Runqora when I sign in", "Opens Runqora hidden in the tray when you sign in to Windows. Servers marked Start with Runqora then start by themselves.", "bool", "off", "off", "Startup"), F("general", "editor", "Editor", "The program that opens configuration files and logs.", "text", "notepad.exe", "notepad.exe", "General"), F("general", "auto_update", "Update automatically", "Checks every module and Runqora itself once a day. Patch updates install themselves while the servers are stopped; bigger upgrades and new Runqora versions always ask first.", "choice", "install", "install", "Updates", { choices: [["install", "Check everything and install patch updates"], ["notify", "Check everything and tell me"], ["off", "Do not check"]] })],
     apache: [F("apache", "port", "Port", "Where the web server listens. 80 is the default; use 8080 if something else has 80.", "number", "80", "80", "Server", { min: 1, max: 65535 }), F("apache", "document_root", "Website folder", "The folder Apache serves. Leave empty to use the htdocs folder inside the install folder.", "path", "", "", "Server"), F("apache", "allow_override", ".htaccess files", "Let sites change Apache settings with .htaccess files. Most frameworks and CMSs need this.", "bool", "on", "on", "Websites"), F("apache", "directory_listing", "Show folder contents", "List the files in a folder that has no index page.", "bool", "on", "on", "Websites"), F("apache", "autostart", "Start with Runqora", "Start Apache when Runqora opens.", "bool", "off", "off", "Startup")],
     php: [F("php", "memory_limit", "Memory limit", "The most memory one script may use, such as 256M. -1 means no limit.", "size", "512M", "128M", "Limits"), F("php", "upload_max_filesize", "Largest upload", "The biggest file a visitor can upload, such as 64M.", "size", "2M", "2M", "Limits"), F("php", "post_max_size", "Largest form post", "Keep this at least as large as the largest upload.", "size", "8M", "8M", "Limits"), F("php", "max_execution_time", "Script time limit", "Seconds before a script is stopped. 0 means no limit.", "number", "30", "30", "Limits", { min: 0, max: 3600 }), F("php", "display_errors", "Show errors on the page", "Handy while developing. Turn it off for anything public.", "choice", "On", "Off", "Errors", { choices: onOff }), F("php", "date.timezone", "Time zone", "For example Europe/Paris or Asia/Dubai. Dates in PHP use this.", "text", "Asia/Dubai", "UTC", "Locale"),
       ...[["curl", "Web requests from PHP", "on"], ["gd", "Image drawing and resizing", "off"], ["intl", "Internationalisation", "off"], ["mbstring", "Text in every language (phpMyAdmin needs it)", "on"], ["mysqli", "MariaDB / MySQL access (phpMyAdmin needs it)", "on"], ["openssl", "Encryption and secure connections", "on"], ["zip", "ZIP archives", "off"]].map(([n, h, v]) => F("php", `ext.${n}`, n, h, "bool", v, "off", "Extensions"))],
@@ -70,9 +70,27 @@ if (!window.__TAURI__) {
     updates.forEach((u) => { u.candidates = []; u.blocked = null; u.backup = null; });
     sites = ["shop", "blog", "portfolio"].map((n) => ({ name: n, host: `${n}.localhost`, folder: `C:\\Sites\\${n}`, exists: true, url: `http://${n}.localhost/`, https_url: `https://${n}.localhost/` }));
   }
+  // progress: a download then the install stages, spread over a few seconds, for the installing/updating states
+  const running = {};
+  const STAGES = [[0.55, "Downloading"], [0.7, "Checking the download"], [0.85, "Unpacking"], [0.95, "Installing the new version"], [1, "Checking the new version"]];
+  async function withProgress(key, ms) {
+    running[key] = [Date.now(), ms];
+    await wait(ms);
+    delete running[key];
+  }
   window.mockInvoke = async (cmd, a = {}) => {
     const m = mods.find((x) => x.id === a.id);
-    await wait(cmd === "modules_status" ? 0 : 900);
+    if (cmd === "progress") {
+      const out = {};
+      for (const [k, [t0, ms]] of Object.entries(running)) {
+        const f = Math.min(1, (Date.now() - t0) / ms);
+        const [, stage] = STAGES.find(([to]) => f <= to) || STAGES.at(-1);
+        out[k] = stage === "Downloading" ? { stage, done: Math.round((f / 0.55) * 36446352), total: 36446352 } : stage === "Unpacking" ? { stage, done: Math.round(((f - 0.7) / 0.15) * 1900), total: 1900 } : { stage, done: 0, total: 0 };
+      }
+      return out;
+    }
+    if (["component_install", "update_apply", "app_update_install"].includes(cmd)) await withProgress(a.id || "app", 4500);
+    await wait(cmd === "modules_status" || cmd === "progress" ? 0 : 900);
     switch (cmd) {
       case "modules_status": return JSON.parse(JSON.stringify(mods));
       case "module_start": m.status = "running"; m.pid = 5000; return `${m.name} started on port ${m.port}`;

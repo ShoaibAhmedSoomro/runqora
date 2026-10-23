@@ -6,7 +6,7 @@ use runqora as rt;
 use std::time::Duration;
 use tauri::{
     image::Image,
-    menu::{IconMenuItem, IsMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu},
+    menu::{CheckMenuItem, IconMenuItem, IsMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu},
     tray::TrayIcon,
     AppHandle, Emitter, Manager, Wry,
 };
@@ -112,7 +112,7 @@ fn submenu(app: &AppHandle, r: &Row) -> tauri::Result<Submenu<Wry>> {
     Submenu::with_items(app, text, true, &refs)
 }
 
-pub fn build(app: &AppHandle, rows: &[Row]) -> tauri::Result<Menu<Wry>> {
+pub fn build(app: &AppHandle, rows: &[Row], login: bool) -> tauri::Result<Menu<Wry>> {
     let mut items: Vec<Item> = vec![Box::new(MenuItem::with_id(app, "show", "Show / Hide", true, None::<&str>)?), Box::new(PredefinedMenuItem::separator(app)?)];
     if rows.is_empty() {
         items.push(Box::new(MenuItem::with_id(app, "none", "No servers installed yet", false, None::<&str>)?));
@@ -125,6 +125,7 @@ pub fn build(app: &AppHandle, rows: &[Row]) -> tauri::Result<Menu<Wry>> {
     items.push(Box::new(MenuItem::with_id(app, "start_all", "Start all", any, None::<&str>)?));
     items.push(Box::new(MenuItem::with_id(app, "stop_all", "Stop all", any, None::<&str>)?));
     items.push(Box::new(PredefinedMenuItem::separator(app)?));
+    items.push(Box::new(CheckMenuItem::with_id(app, "login", "Start with Windows", true, login, None::<&str>)?));
     items.push(Box::new(MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?));
     let refs: Vec<&dyn IsMenuItem<Wry>> = items.iter().map(|b| b.as_ref()).collect();
     Menu::with_items(app, &refs)
@@ -208,14 +209,14 @@ fn open_url(url: &str) {
 /// Rebuild the menu and tooltip whenever a server starts, stops or appears. Polls the same state the window shows.
 pub fn keep_fresh(app: AppHandle, tray: TrayIcon) {
     std::thread::spawn(move || {
-        let mut last: Option<Vec<Row>> = None;
+        let mut last: Option<(Vec<Row>, bool)> = None;
         loop {
-            let now = rows();
+            let now = (rows(), rt::launch_at_login());
             if last.as_ref() != Some(&now) {
-                let (a, t, r) = (app.clone(), tray.clone(), now.clone());
+                let (a, t, (r, login)) = (app.clone(), tray.clone(), now.clone());
                 // menus belong to the main thread; building them from here can stall every window call
                 let _ = app.run_on_main_thread(move || {
-                    if let Ok(m) = build(&a, &r) {
+                    if let Ok(m) = build(&a, &r, login) {
                         let _ = t.set_menu(Some(m));
                         let _ = t.set_tooltip(Some(tooltip(&r)));
                     }

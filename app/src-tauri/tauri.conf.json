@@ -42,7 +42,8 @@
         "installMode": "currentUser",
         "displayLanguageSelector": false,
         "installerIcon": "icons/icon.ico",
-        "startMenuFolder": "Runqora"
+        "startMenuFolder": "Runqora",
+        "installerHooks": "installer-hooks.nsh"
       }
     }
   }

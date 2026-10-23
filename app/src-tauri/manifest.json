@@ -104,7 +104,8 @@
       "binary": "phpmyadmin/index.php",
       "configs": [
         "phpmyadmin/config.inc.php"
-      ]
+      ],
+      "admin_url": "http://localhost:{apache_port}/phpmyadmin/"
     },
     {
       "id": "jre",

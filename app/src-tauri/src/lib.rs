@@ -1276,6 +1276,61 @@ pub fn admin_url(c: &Component) -> Option<String> {
     Some(url.replace("localhost:80/", "localhost/"))
 }
 
+/// What has to be running before this module's page can be opened, in start order. Optional ones are skipped when
+/// they are not installed (Adminer works without MariaDB).
+pub fn needs_running(id: &str) -> &'static [&'static str] {
+    match id {
+        "phpmyadmin" | "mariadb" => &["mariadb", "apache"], // its page is phpMyAdmin, served by Apache
+        "adminer" => &["mariadb", "apache"],
+        "apache" => &["apache"],
+        _ => &[],
+    }
+}
+
+/// Open a module's page, starting what it needs first: Open on phpMyAdmin starts MariaDB and Apache if they are stopped.
+/// Reports progress under `id` so its card says what is happening ("Starting Apache...").
+pub fn launch(id: &str, open: &dyn Fn(&str) -> Result<(), String>) -> Result<String, String> {
+    let root = root();
+    let c = component(id)?;
+    let url = admin_url(&c).ok_or_else(|| format!("{} has no page to open", c.name))?;
+    if !root.join(&c.binary).exists() {
+        return Err(format!("{} is not installed", c.name));
+    }
+    if matches!(id, "mariadb") && !root.join("phpmyadmin/index.php").exists() {
+        return Err("MariaDB is managed in the browser with phpMyAdmin: install phpMyAdmin first".into());
+    }
+    let _busy = Busy::new(id, "Starting");
+    let mut started = vec![];
+    let mut wanted: Vec<&str> = needs_running(id).to_vec();
+    if c.args.is_some() && !wanted.contains(&id) {
+        wanted.push(id);
+    }
+    for dep in wanted {
+        let d = component(dep)?;
+        if !root.join(&d.binary).exists() {
+            if dep == "apache" {
+                return Err(format!("{} is shown through Apache, which is not installed", c.name));
+            }
+            continue; // an optional helper that is not there
+        }
+        if state(&d, &root).status != "running" {
+            progress_set(id, &format!("Starting {}", d.name), 0, 0);
+            start(&d, &root)?;
+            started.push(d.name);
+        }
+    }
+    progress_set(id, "Opening the page", 0, 0);
+    open(&url)?;
+    Ok(if started.is_empty() { format!("Opened {}", c.name) } else { format!("Started {} and opened {}", started.join(" and "), c.name) })
+}
+
+/// The folder a module lives in (it must exist).
+pub fn module_folder(id: &str) -> Result<PathBuf, String> {
+    let c = component(id)?;
+    let dir = root().join(&c.extract_to);
+    if dir.is_dir() { Ok(dir) } else { Err(format!("{} is not installed yet", c.name)) }
+}
+
 // ---- settings (settings.json in the install folder) ----
 
 #[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq)]
@@ -1779,6 +1834,27 @@ smtp_port = 1025
         let apache = comp("apache");
         assert!(!service_is_ours(&Component { service: Some(ServiceSpec { name: "RunqoraNoSuchService".into(), install: vec![], remove: vec![] }), ..apache.clone() }, mine));
         assert!(!service_is_ours(&Component { service: Some(ServiceSpec { name: "EventLog".into(), install: vec![], remove: vec![] }), ..apache }, mine));
+    }
+
+    #[test]
+    fn opening_a_page_starts_what_it_needs_and_says_why_it_cannot() {
+        assert_eq!(needs_running("phpmyadmin"), ["mariadb", "apache"], "the database first, then the web server");
+        assert_eq!(needs_running("apache"), ["apache"]);
+        assert!(needs_running("mailpit").is_empty(), "a server that needs nothing else is started by its own Start");
+        // pages exist for every server with one, and for phpMyAdmin and Adminer
+        for id in ["apache", "mariadb", "phpmyadmin", "adminer", "tomcat", "mailpit", "sftpgo"] {
+            assert!(admin_url(&component(id).unwrap()).is_some(), "{id} has a page");
+        }
+        // nothing is installed in the default folder of this unit test run unless the machine has Runqora: only the messages are checked
+        let nowhere = std::env::temp_dir().join("rt-launch-none");
+        let _ = fs::remove_dir_all(&nowhere);
+        std::env::set_var("RUNQORA_DIR", &nowhere);
+        let e = launch("phpmyadmin", &|_| Ok(())).unwrap_err();
+        let f = module_folder("apache").unwrap_err();
+        std::env::remove_var("RUNQORA_DIR");
+        assert!(e.contains("not installed"), "{e}");
+        assert!(f.contains("not installed yet"), "{f}");
+        assert!(launch("nope", &|_| Ok(())).is_err() && module_folder("nope").is_err());
     }
 
     #[test]

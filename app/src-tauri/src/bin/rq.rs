@@ -16,6 +16,9 @@ Usage:
   rq wordpress <name>     make a WordPress site with its own database (WordPress and MariaDB must be installed, MariaDB running)
   rq external [status|start|stop|open|get] [filezilla|mercury]
                                run FileZilla Server / Mercury Mail when they are installed on this PC
+  rq open <module>        open a module's page (apache, mariadb, phpmyadmin, adminer, tomcat, mailpit, sftpgo),
+                               starting Apache and MariaDB first when it needs them
+  rq folder [module]      open the install folder, or one module's folder, in Explorer
   rq ports                list listening TCP ports with their programs
   rq updates              look for newer versions of every installed module and of Runqora itself
   rq updates --probe <module> [pretend-version]
@@ -56,6 +59,26 @@ fn main() -> ExitCode {
             None => usage("wordpress needs a site name"),
         },
         Some("external") => external(&a[1..]),
+        Some("open") => match a.get(1) {
+            Some(id) => open_module(id),
+            None => usage("open needs a module name"),
+        },
+        Some("folder") => {
+            let dir = match a.get(1) {
+                Some(id) => rt::module_folder(id),
+                None => Ok(rt::root()),
+            };
+            match dir {
+                Ok(d) => match std::env::var_os("RQ_NO_BROWSER") {
+                    Some(_) => {
+                        println!("{}", d.display());
+                        ExitCode::SUCCESS
+                    }
+                    None => report(std::process::Command::new("explorer.exe").arg(&d).spawn().map(|_| format!("Opened {}", d.display())).map_err(|e| e.to_string())),
+                },
+                Err(e) => fail(e),
+            }
+        }
         Some("ports") => ports(),
         Some("updates") if a.get(1).map(String::as_str) == Some("--probe") => probe(&a[2..]),
         Some("updates") => updates(),
@@ -462,4 +485,17 @@ fn external(args: &[String]) -> ExitCode {
         "get" => report(rt::externals::get_url(id).map(|u| format!("Download it from its publisher: {u}"))),
         _ => usage("external: status | start|stop|open|get <filezilla|mercury>"),
     }
+}
+
+fn open_module(id: &str) -> ExitCode {
+    // RQ_NO_BROWSER prints the address instead of opening it (scripts, tests)
+    let opener = |url: &str| -> Result<(), String> {
+        if std::env::var_os("RQ_NO_BROWSER").is_some() {
+            println!("{url}");
+            return Ok(());
+        }
+        use std::os::windows::process::CommandExt;
+        std::process::Command::new("cmd").args(["/C", "start", "", url]).creation_flags(0x0800_0000).spawn().map(|_| ()).map_err(|e| e.to_string())
+    };
+    report(rt::launch(id, &opener))
 }

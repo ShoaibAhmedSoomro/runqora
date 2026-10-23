@@ -167,6 +167,7 @@ td.num, th.num { font-variant-numeric: tabular-nums; }
 .tab[aria-selected="true"]::after { content: ""; position: absolute; left: 12px; right: 12px; bottom: -1px; height: 3px; border-radius: 2px; background: var(--color-accent); }
 .row.plain .control { flex: none; }
 input.wide { width: 280px; }
+.btn.icon-only { padding: 0; width: 32px; min-width: 32px; justify-content: center; }
 .module-head { position: relative; }
 .progress { position: absolute; left: 12px; right: 12px; bottom: 0; height: 3px; border-radius: 2px; overflow: hidden; background: color-mix(in srgb, var(--color-accent) 18%, transparent); }
 .progress i { display: block; height: 100%; width: 0; border-radius: 2px; background: var(--color-accent); transition: width .25s ease; }

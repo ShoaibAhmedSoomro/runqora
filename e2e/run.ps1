@@ -190,6 +190,18 @@ Check "MOD-N1" "installing an unknown module fails cleanly (exit 1), and start-a
 Rq stop | Out-Null
 Remove-Item $siteDir -Recurse -Force -ErrorAction SilentlyContinue; if (-not $sslExisted) { Remove-Item "$Root\ssl" -Recurse -Force -ErrorAction SilentlyContinue }
 
+Write-Host "`nOpen buttons and folders"
+$env:RQ_NO_BROWSER = "1"   # print the address instead of opening a browser
+Check "OPEN-H1" "Open on phpMyAdmin starts MariaDB and Apache from stopped, then gives its page, which answers" {
+  Rq stop | Out-Null; $o = Rq open phpmyadmin; $code = Code
+  $code -eq 0 -and $o -match "phpmyadmin/" -and $o -match "Started" -and (Listening $ApachePort) -and (Listening $DbPort) -and ((Get-Page "http://127.0.0.1:$ApachePort/phpmyadmin/" 120).StatusCode -eq 200) }
+Check "OPEN-E1" "opening again starts nothing and still gives the page" { $o = Rq open phpmyadmin; (Code) -eq 0 -and $o -match "phpmyadmin/" -and $o -match "Opened" -and $o -notmatch "Started" }
+Check "OPEN-N1" "opening a module that is not installed says so (exit 1); an unknown one too" { Rq open tomcat | Out-Null; $a = Code; Rq open nope | Out-Null; $b = Code; $a -eq 1 -and $b -eq 1 }
+Check "FOLDER-H1" "the install folder and a module's folder are found" { $a = Rq folder; $c1 = Code; $b = Rq folder phpmyadmin; $c2 = Code; $c1 -eq 0 -and $c2 -eq 0 -and $a.Trim().Length -gt 3 -and $b -match "phpmyadmin" }
+Check "FOLDER-N1" "a module that is not installed has no folder to open (exit 1)" { Rq folder tomcat | Out-Null; (Code) -eq 1 }
+Remove-Item Env:RQ_NO_BROWSER -ErrorAction SilentlyContinue
+Rq stop | Out-Null
+
 # put everything back
 Rq stop | Out-Null
 Set-Content $phpIni $phpIniBackup -Encoding ascii -NoNewline; Set-Content $myIni $myIniBackup -Encoding ascii -NoNewline; Set-Content "$Root\apache\conf\httpd.conf" $confBackup -Encoding ascii -NoNewline

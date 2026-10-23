@@ -50,6 +50,7 @@ export function audit(root) {
   for (let i = 0; i < texts.length; i++) for (let j = i + 1; j < texts.length; j++) {
     const a = texts[i], b = texts[j];
     if (a.e.contains(b.e) || b.e.contains(a.e)) continue;
+    if (a.e.closest(".plist-head") || b.e.closest(".plist-head")) continue; // a sticky header sits over rows that scroll under it, by design
     const hit = a.boxes.some((x) => b.boxes.some((y) => area(x, y) > 8));
     if (hit) add("text overlaps text", a.e, "", b.e);
   }
@@ -116,7 +117,7 @@ export const steps = [
   ["Dialog: new site", async () => { await click('[data-page="sites"]', 600); await click("#site-new", 800); const d = document.querySelector("dialog"); const i = d ? audit(d) : [{ kind: "dialog did not open", el: "#site-new", detail: "" }]; d?.close(); document.querySelectorAll("dialog").forEach((x) => x.remove()); return i; }],
   ["Updates (all cards open)", async () => { await click('[data-page="updates"]', 3200); document.querySelectorAll("#updates .chev[aria-expanded=false]").forEach((b) => b.click()); await wait(500); return audit(document.querySelector(".content")); }],
   ["Dialog: confirm upgrade", async () => { const b = find("#updates .btn.sm", /Review/); if (!b) return []; b.click(); await wait(800); const d = document.querySelector("dialog"); const i = d ? audit(d) : []; d?.close(); await wait(200); return i; }],
-  ["Ports", async () => { await click('[data-page="ports"]', 2200); return audit(document.querySelector(".content")); }],
+  ["Ports", async () => { await click('[data-page="ports"]', 2200); const l = document.querySelector("#ports"); if (l) l.scrollTop = 0; return audit(document.querySelector(".content")); }],
   ["Activity", async () => { await click('[data-page="activity"]', 400); return audit(document.querySelector(".content")); }],
   ...["general", "apache", "php", "mariadb", "file"].map((t) => [`Settings: ${t}`, async () => { await click('[data-page="settings"]', 300); await click(`#tab-${t}`, 1800); return audit(document.querySelector(".content")); }]),
   ["About", async () => { await click('[data-page="about"]', 1500); return audit(document.querySelector(".content")); }],

@@ -42,6 +42,22 @@ async fn component_install(id: String) -> Result<String, String> {
     .await
 }
 
+/// Open a module's page, starting Apache and MariaDB first when it needs them.
+#[tauri::command]
+async fn module_launch(id: String) -> Result<String, String> {
+    blocking(move || {
+        rt::launch(&id, &|url: &str| Command::new("cmd").args(["/C", "start", "", url]).creation_flags(NO_WINDOW).spawn().map(|_| ()).map_err(|e| e.to_string()))
+    })
+    .await
+}
+
+/// Show a module's folder in Explorer. Only the module's name comes from the UI.
+#[tauri::command]
+fn open_module_folder(id: String) -> Result<(), String> {
+    let dir = rt::module_folder(&id)?;
+    Command::new("explorer.exe").arg(dir).spawn().map(|_| ()).map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 fn module_admin(id: String) -> Result<(), String> {
     // the url is built in the core from the manifest and ports, never from UI input
@@ -450,7 +466,7 @@ fn main() {
     }
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
-            modules_status, module_start, module_stop, component_install, module_admin, module_service, module_open_file, modules_all, ports_scan, take_notes,
+            modules_status, module_launch, open_module_folder, module_start, module_stop, component_install, module_admin, module_service, module_open_file, modules_all, ports_scan, take_notes,
             settings_get, settings_set_editor, settings_set_port, settings_set_autostart, settings_set_auto_update, app_info, open_root,
             updates_check, update_apply, update_rollback, open_notes, fx_enabled,
             ui_ready, progress, app_update_check, app_update_install, developer_links, open_developer, sites_list, site_add, site_remove, site_open_folder, wordpress_create, externals_status, external_start, external_stop, external_open, external_get, appearance, apply_theme, open_url, https_status, https_trust, https_untrust, https_regenerate, config_get, config_set, module_restart, config_export, config_import, config_ini_text, setup_check, setup_fix, setup_fix_all, port_remedy, port_end, port_stop_service, port_suggest
@@ -465,6 +481,9 @@ fn main() {
                 .show_menu_on_left_click(false)
                 .on_menu_event(|app, e| match e.id.as_ref() {
                     "show" => toggle_window(app),
+                    "root_folder" => {
+                        let _ = std::process::Command::new("explorer.exe").arg(rt::root()).spawn();
+                    }
                     "start_all" => rt::all_servers(true),
                     "stop_all" => rt::all_servers(false),
                     "login" => {

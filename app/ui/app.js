@@ -171,6 +171,12 @@ async function act(m, label, verb, command, args = {}) {
 const open = (m, f) => invoke("module_open_file", { id: m.id, rel: f.rel }).catch((e) => note("error", m.name, String(e)));
 
 // ---- modules page ----
+/** Open a module's page. If Apache or MariaDB (or the module itself) is stopped, it is started first. */
+function openButton(m, busy, k) {
+  const needs = m.status !== "running" && m.server ? "Starts it, then opens it" : m.id === "phpmyadmin" || m.id === "adminer" ? "Starts Apache and MariaDB if needed, then opens it" : "Opens it in your browser";
+  return h("button", { class: "btn", disabled: !!busy || m.status === "blocked", title: needs, data: k("admin"), on: { click: () => act(m, "Starting", "open", "module_launch") } }, icon(G.globe), "Open");
+}
+
 function moduleCard(m, i) {
   const busy = view.busy.get(m.id);
   const hasBody = m.configs.length || m.logs.length || m.can_service || m.blocker || NOTE[m.id];
@@ -190,8 +196,13 @@ function moduleCard(m, i) {
     const running = m.status === "running";
     actions.append(
       h("button", { class: `btn ${running ? "" : "accent"}`, disabled: !!busy || m.status === "blocked", data: k("toggle"), on: { click: () => act(m, running ? "Stopping" : "Starting", running ? "stop" : "start", running ? "module_stop" : "module_start") } }, icon(running ? G.stop : G.play), running ? "Stop" : "Start"),
-      m.has_admin && h("button", { class: "btn", disabled: !!busy || !running, data: k("admin"), on: { click: () => invoke("module_admin", { id: m.id }).catch((e) => note("error", m.name, String(e))) } }, icon(G.globe), "Open"),
+      m.has_admin && openButton(m, busy, k),
     );
+  } else if (m.has_admin) {
+    actions.append(openButton(m, busy, k)); // phpMyAdmin, Adminer: starts Apache and MariaDB for you, then opens the page
+  }
+  if (m.status !== "missing") {
+    actions.append(h("button", { class: "btn ghost icon-only", title: `Open the ${m.name} folder`, "aria-label": `Open the ${m.name} folder`, data: k("folder"), on: { click: () => invoke("open_module_folder", { id: m.id }).catch((e) => note("error", m.name, String(e))) } }, icon(G.folder)));
   }
 
   const head = h("div", { class: `module-head ${m.status}` },
@@ -880,6 +891,7 @@ for (const [id, on] of [["#start-all", true], ["#stop-all", false]]) {
     for (const ms of [800, 2500, 5000]) setTimeout(() => refresh(), ms); // the core works in the background
   });
 }
+$("#open-root").addEventListener("click", () => invoke("open_root").catch((e) => note("error", "Couldn't open the folder.", String(e))));
 $("#log-clear").addEventListener("click", () => { view.log = []; paintLog(); });
 $("#log-copy").addEventListener("click", () => navigator.clipboard.writeText(view.log.map((r) => `${r.t} [${r.level}] ${r.text}`).join("\n")).then(() => note("success", "", "Copied the activity log.")));
 

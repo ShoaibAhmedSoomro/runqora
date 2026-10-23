@@ -100,6 +100,7 @@ fn submenu(app: &AppHandle, r: &Row) -> tauri::Result<Submenu<Wry>> {
     }
     if !r.external {
         items.push(Box::new(MenuItem::with_id(app, format!("{key}:settings"), "Settings...", true, None::<&str>)?));
+        items.push(Box::new(MenuItem::with_id(app, format!("{key}:folder"), "Open folder", true, None::<&str>)?));
     }
     if !r.files.is_empty() {
         items.push(Box::new(PredefinedMenuItem::separator(app)?));
@@ -122,6 +123,7 @@ pub fn build(app: &AppHandle, rows: &[Row], login: bool) -> tauri::Result<Menu<W
     }
     let any = rows.iter().any(|r| !r.external);
     items.push(Box::new(PredefinedMenuItem::separator(app)?));
+    items.push(Box::new(MenuItem::with_id(app, "root_folder", "Open Runqora folder", true, None::<&str>)?));
     items.push(Box::new(MenuItem::with_id(app, "start_all", "Start all", any, None::<&str>)?));
     items.push(Box::new(MenuItem::with_id(app, "stop_all", "Stop all", any, None::<&str>)?));
     items.push(Box::new(PredefinedMenuItem::separator(app)?));
@@ -195,6 +197,12 @@ pub fn on_menu(app: &AppHandle, id: &str) -> bool {
                     note(false, e);
                 }
             }
+            "folder" => match rt::module_folder(&who) {
+                Ok(dir) => {
+                    let _ = std::process::Command::new("explorer.exe").arg(dir).spawn();
+                }
+                Err(e) => note(false, e),
+            },
             _ => {}
         }
     });

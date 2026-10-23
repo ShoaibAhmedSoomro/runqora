@@ -10,7 +10,7 @@ if (!window.__TAURI__) {
     base("apache", "Apache HTTP Server", "2.4.66", { status: "running", pid: 4242, port: 80, server: true, has_admin: true, can_service: true, configs: [file("apache/conf/httpd.conf"), file("apache/conf/extra/runqora.conf")], logs: [file("apache/logs/error_log"), file("apache/logs/access_log", false)] }),
     base("php", "PHP (thread safe)", "8.3.35", { status: "installed", configs: [file("php/php.ini")] }),
     base("mariadb", "MariaDB", "10.11.19", { status: scenario === "mixed" ? "blocked" : "stopped", port: 3306, server: true, has_admin: true, can_service: true, service_installed: true, blocker: scenario === "mixed" ? { pid: 1234, name: "mysqld.exe", path: "C:\\Program Files\\MySQL\\bin\\mysqld.exe", ours: false } : null, configs: [file("mariadb/my.ini")], logs: [file("mariadb/data/mysql_error.log")] }),
-    base("phpmyadmin", "phpMyAdmin", "5.2.3", { status: "missing" }),
+    base("phpmyadmin", "phpMyAdmin", "5.2.3", { status: "missing", has_admin: true }),
     base("jre", "Java runtime (Temurin 21)", "21.0.12.1", { status: "missing" }),
     base("tomcat", "Apache Tomcat", "10.1.61", { status: "missing", port: 8080, server: true, has_admin: true, configs: [file("tomcat/conf/server.xml")] }),
     base("mailpit", "Mailpit (mail catcher)", "1.31.6", { status: "stopped", port: 8025, server: true, has_admin: true }),
@@ -18,7 +18,7 @@ if (!window.__TAURI__) {
     base("wordpress", "WordPress", "7.1.3", { status: "installed" }),
     base("node", "Node.js (LTS)", "24.22.1", { status: "missing" }),
     base("composer", "Composer", "2.10.3", { status: "missing" }),
-    base("adminer", "Adminer", "6.1.2", { status: "missing" }),
+    base("adminer", "Adminer", "6.1.2", { status: "missing", has_admin: true }),
   ];
   let sites = location.hash.includes("nosites") ? [] : [{ name: "shop", host: "shop.localhost", folder: "C:\\Runqora\\htdocs\\shop", exists: true, url: "http://shop.localhost/", https_url: httpsOnAtLoad() ? "https://shop.localhost/" : null }, { name: "blog", host: "blog.localhost", folder: "D:\\Projects\\a-client-with-a-very-long-folder-name\\wordpress-site-root", exists: false, url: "http://blog.localhost/", https_url: null }];
   const externals = [{ id: "filezilla", name: "FileZilla Server", status: "stopped", pid: null, port: 21, path: "C:\\Program Files\\FileZilla Server\\filezilla-server.exe", has_gui: true, blocker: null }, { id: "mercury", name: "Mercury Mail", status: "missing", pid: null, port: 25, path: "", has_gui: false, blocker: null }];
@@ -90,6 +90,7 @@ if (!window.__TAURI__) {
       return out;
     }
     if (["component_install", "update_apply", "app_update_install"].includes(cmd)) await withProgress(a.id || "app", 4500);
+    if (cmd === "module_launch") await withProgress(a.id, 2500);
     await wait(cmd === "modules_status" || cmd === "progress" ? 0 : 900);
     switch (cmd) {
       case "modules_status": return JSON.parse(JSON.stringify(mods));
@@ -97,6 +98,13 @@ if (!window.__TAURI__) {
       case "module_stop": m.status = "stopped"; m.pid = null; return `${m.name} stopped`;
       case "component_install": m.status = m.server ? "stopped" : "installed"; return `${m.name} ${m.version} installed. Restart Apache to apply changes.`;
       case "module_service": m.service_installed = a.install; return a.install ? `${m.name} installed as a Windows service` : "Windows service removed";
+      case "module_launch": {
+        const started = [];
+        for (const dep of ["mariadb", "apache"]) { const d = mods.find((x) => x.id === dep); if (d && d.status === "stopped" && (m.id === "phpmyadmin" || m.id === "adminer" || m.id === dep)) { d.status = "running"; d.pid = 7000; started.push(d.name); } }
+        if (m.server && m.status === "stopped") { m.status = "running"; m.pid = 7100; started.push(m.name); }
+        return started.length ? `Started ${started.join(" and ")} and opened ${m.name}` : `Opened ${m.name}`;
+      }
+      case "open_module_folder": return null;
       case "module_open_file": case "module_admin": case "open_root": case "modules_all": return null;
 
       case "https_status": return { ca_exists: httpsOn, cert_exists: httpsOn, names: ["localhost", "127.0.0.1", "::1"], expires: "2029-01-17T10:00:00Z", trusted: httpsTrusted, ca_path: "C:\\Runqora\\ssl\\ca.crt", folder: "C:\\Runqora\\ssl" };

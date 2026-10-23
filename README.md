@@ -23,6 +23,8 @@
 **Stack**
 - Installs Apache, PHP, MariaDB and phpMyAdmin, each checked against the publisher's checksum before it is unpacked
 - Also available: Apache Tomcat (with its Java runtime), Mailpit mail catcher, SFTPGo (FTP and SFTP), WordPress, Node.js, Composer and Adminer
+- **Open** on any module starts what it needs first: Open on phpMyAdmin starts MariaDB and Apache if they are stopped, then opens the page (`rq open phpmyadmin` does the same)
+- Folder buttons: one for the whole install and one on every module (also in the tray menu, and `rq folder`)
 - Start, stop and restart each server, start everything in the right order, or start chosen servers when Runqora opens
 - Optional Windows service for Apache and MariaDB
 - Runs FileZilla Server and Mercury Mail when they are already installed on your PC
@@ -52,6 +54,7 @@
 - Fluent design with Mica, light and dark themes that follow Windows, and an accent colour that follows yours
 - Responsive layout that fills the window at any size
 - Lives in the system tray like XAMPP's control panel: closing the window keeps Runqora running, and the tray menu has a submenu per server (status dot, Start/Stop, Open, Settings, config files and logs), Start all, Stop all and Quit
+- Updating Runqora installs over the old version in place (nothing is uninstalled first; your settings, servers and databases are untouched)
 - Start with Windows: the installer asks once, and it is a switch in Settings and a tick in the tray menu. It opens hidden in the tray; a second launch just brings the running copy forward
 - A full command line, `rq`, for everything the window does
 

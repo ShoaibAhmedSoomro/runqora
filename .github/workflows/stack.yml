@@ -33,7 +33,7 @@ jobs:
         id: want
         run: echo "go=${{ (inputs.only == '' || inputs.only == matrix.prog) && 'yes' || 'no' }}" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@v4
-      - name: On a push, build what scripts/stack/only.txt names (empty: everything)
+      - name: On a push build what scripts/stack/only.txt names, or everything when it is empty
         if: github.event_name == 'push'
         id: want_push
         run: |

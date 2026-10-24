@@ -15,6 +15,34 @@ use std::{
 };
 
 const NO_WINDOW: u32 = 0x0800_0000;
+
+/// How publishers spell this machine in file names and API queries.
+pub struct Names {
+    /// what follows `apache-tomcat-<version>` in the file name
+    pub tomcat: &'static str,
+    pub adoptium_os: &'static str,
+    pub adoptium_arch: &'static str,
+    /// the entry in nodejs.org's index.json `files` list, and what follows `node-v<version>-` in the file name
+    pub node_key: &'static str,
+    pub node_file: &'static str,
+    pub mailpit: &'static str,
+    /// with `{v}` for the version
+    pub sftpgo: &'static str,
+}
+
+#[cfg(windows)]
+pub const NAMES: Names = Names { tomcat: "-windows-x64.zip", adoptium_os: "windows", adoptium_arch: "x64", node_key: "win-x64-zip", node_file: "win-x64.zip", mailpit: "mailpit-windows-amd64.zip", sftpgo: "sftpgo_v{v}_windows_portable.zip" };
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+pub const NAMES: Names = Names { tomcat: ".tar.gz", adoptium_os: "linux", adoptium_arch: "x64", node_key: "linux-x64", node_file: "linux-x64.tar.gz", mailpit: "mailpit-linux-amd64.tar.gz", sftpgo: "sftpgo_v{v}_linux_x86_64.tar.xz" };
+#[cfg(all(target_os = "linux", target_arch = "aarch64"))]
+pub const NAMES: Names = Names { tomcat: ".tar.gz", adoptium_os: "linux", adoptium_arch: "aarch64", node_key: "linux-arm64", node_file: "linux-arm64.tar.gz", mailpit: "mailpit-linux-arm64.tar.gz", sftpgo: "sftpgo_v{v}_linux_arm64.tar.xz" };
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+pub const NAMES: Names = Names { tomcat: ".tar.gz", adoptium_os: "mac", adoptium_arch: "aarch64", node_key: "darwin-arm64", node_file: "darwin-arm64.tar.gz", mailpit: "mailpit-darwin-arm64.tar.gz", sftpgo: "sftpgo_v{v}_macOS_arm64.tar.xz" };
+#[cfg(all(target_os = "macos", target_arch = "x86_64"))]
+pub const NAMES: Names = Names { tomcat: ".tar.gz", adoptium_os: "mac", adoptium_arch: "x64", node_key: "darwin-x64", node_file: "darwin-x64.tar.gz", mailpit: "mailpit-darwin-amd64.tar.gz", sftpgo: "sftpgo_v{v}_macOS_x86_64.tar.xz" };
+#[cfg(all(target_os = "linux", not(any(target_arch = "x86_64", target_arch = "aarch64"))))]
+pub const NAMES: Names = Names { tomcat: ".tar.gz", adoptium_os: "linux", adoptium_arch: "x64", node_key: "linux-x64", node_file: "linux-x64.tar.gz", mailpit: "mailpit-linux-amd64.tar.gz", sftpgo: "sftpgo_v{v}_linux_x86_64.tar.xz" };
+
 pub const HOSTS: &[&str] = &[
     "windows.php.net", "downloads.php.net", "www.apachelounge.com", "downloads.mariadb.org", "archive.mariadb.org", "files.phpmyadmin.net", "www.phpmyadmin.net",
     "api.adoptium.net", "github.com", "api.github.com", "archive.apache.org", "api.wordpress.org", "wordpress.org", "downloads.wordpress.org", "nodejs.org", "getcomposer.org",
@@ -322,7 +350,8 @@ pub fn parse_adoptium(json: &str, current: &str) -> Option<Candidate> {
         return None;
     }
     let pkg = &rel["binary"]["package"];
-    Some(plain(&version, current, "Java", pkg["link"].as_str()?.into(), pkg["checksum"].as_str()?.to_lowercase(), "*", "https://adoptium.net/temurin/release-notes/".into(), vec![]))
+    let strip = if NAMES.adoptium_os == "mac" { format!("{}-jre/Contents/Home/", rel["release_name"].as_str()?) } else { "*".to_string() };
+    Some(plain(&version, current, "Java", pkg["link"].as_str()?.into(), pkg["checksum"].as_str()?.to_lowercase(), &strip, "https://adoptium.net/temurin/release-notes/".into(), vec![]))
 }
 
 /// api.adoptium.net/v3/info/available_releases -> the newest long-term release
@@ -347,7 +376,7 @@ pub fn tomcat_candidate(version: &str, sha512_text: &str, current: &str) -> Opti
         version,
         current,
         "Tomcat",
-        format!("https://archive.apache.org/dist/tomcat/tomcat-{major}/v{version}/bin/apache-tomcat-{version}-windows-x64.zip"),
+        format!("https://archive.apache.org/dist/tomcat/tomcat-{major}/v{version}/bin/apache-tomcat-{version}{}", NAMES.tomcat),
         format!("sha512:{sha}"),
         &format!("apache-tomcat-{version}/"),
         "https://tomcat.apache.org/whichversion.html".into(),
@@ -398,7 +427,7 @@ pub fn parse_node(index: &str, current: &str) -> Vec<String> {
         .as_array()
         .into_iter()
         .flatten()
-        .filter(|e| e["files"].as_array().is_some_and(|f| f.iter().any(|x| x == "win-x64-zip")))
+        .filter(|e| e["files"].as_array().is_some_and(|f| f.iter().any(|x| x == NAMES.node_key)))
         .filter_map(|e| Some((e["version"].as_str()?.trim_start_matches('v').to_string(), e["lts"].is_string())))
         .collect();
     let mut out = vec![];
@@ -412,7 +441,7 @@ pub fn parse_node(index: &str, current: &str) -> Vec<String> {
 }
 
 pub fn node_candidate(version: &str, shasums: &str, current: &str) -> Option<Candidate> {
-    let file = format!("node-v{version}-win-x64.zip");
+    let file = format!("node-v{version}-{}", NAMES.node_file);
     let sha = shasums.lines().find(|l| l.trim_end().ends_with(file.as_str())).and_then(|l| hex_token(l, 64))?;
     let mut c = plain(version, current, "Node.js", format!("https://nodejs.org/dist/v{version}/{file}"), sha, "*", format!("https://nodejs.org/en/blog/release/v{version}"), vec![]);
     if parse_ver(version).first() == parse_ver(current).first() {
@@ -460,6 +489,9 @@ pub fn blocked_reason(c: &Component, root: &Path) -> Option<String> {
 }
 
 fn candidates_for(c: &Component, root: &Path, current: &str, pma_json: Option<&str>) -> Result<Vec<Candidate>, String> {
+    if cfg!(unix) && matches!(c.id.as_str(), "apache" | "php" | "mariadb") {
+        return Ok(vec![]); // built by Runqora's own stack workflow: they arrive with a new Runqora release
+    }
     match c.id.as_str() {
         "php" => {
             let pma_range = pma_json.and_then(|j| component("phpmyadmin").ok().and_then(|p| detect_version(&p, root)).and_then(|v| pma_php_range(j, &v)));
@@ -497,7 +529,7 @@ fn candidates_for(c: &Component, root: &Path, current: &str, pma_json: Option<&s
         }
         "jre" => {
             let major = parse_ver(current).first().copied().unwrap_or(21);
-            let q = |m: u32| format!("https://api.adoptium.net/v3/assets/latest/{m}/hotspot?architecture=x64&image_type=jre&os=windows");
+            let q = |m: u32| format!("https://api.adoptium.net/v3/assets/latest/{m}/hotspot?architecture={}&image_type=jre&os={}", NAMES.adoptium_arch, NAMES.adoptium_os);
             let mut out: Vec<Candidate> = parse_adoptium(&http_get(&q(major))?, current).into_iter().collect();
             if let Some(lts) = parse_adoptium_lts(&http_get("https://api.adoptium.net/v3/info/available_releases")?).filter(|l| *l > major) {
                 out.extend(parse_adoptium(&http_get(&q(lts))?, current).map(|mut c| {
@@ -517,13 +549,13 @@ fn candidates_for(c: &Component, root: &Path, current: &str, pma_json: Option<&s
                     Err(e) => return Err(e),
                 };
                 let Some(v) = parse_tomcat_versions(&page).into_iter().filter(|v| cmp_ver(v, current).is_gt()).last() else { continue };
-                let sha = http_get(&format!("https://archive.apache.org/dist/tomcat/tomcat-{m}/v{v}/bin/apache-tomcat-{v}-windows-x64.zip.sha512"))?;
+                let sha = http_get(&format!("https://archive.apache.org/dist/tomcat/tomcat-{m}/v{v}/bin/apache-tomcat-{v}{}.sha512", NAMES.tomcat))?;
                 out.extend(tomcat_candidate(&v, &sha, current));
             }
             Ok(out)
         }
-        "mailpit" => Ok(parse_github_release(&http_get("https://api.github.com/repos/axllent/mailpit/releases/latest")?, current, "Mailpit", &|_| "mailpit-windows-amd64.zip".into(), "").into_iter().collect()),
-        "sftpgo" => Ok(parse_github_release(&http_get("https://api.github.com/repos/drakkan/sftpgo/releases/latest")?, current, "SFTPGo", &|v| format!("sftpgo_v{v}_windows_portable.zip"), "*").into_iter().collect()),
+        "mailpit" => Ok(parse_github_release(&http_get("https://api.github.com/repos/axllent/mailpit/releases/latest")?, current, "Mailpit", &|_| NAMES.mailpit.into(), "").into_iter().collect()),
+        "sftpgo" => Ok(parse_github_release(&http_get("https://api.github.com/repos/drakkan/sftpgo/releases/latest")?, current, "SFTPGo", &|v| NAMES.sftpgo.replace("{v}", v), "*").into_iter().collect()),
         "adminer" => Ok(parse_github_release(&http_get("https://api.github.com/repos/vrana/adminer/releases/latest")?, current, "Adminer", &|v| format!("adminer-{v}.php"), "").into_iter().collect()),
         "wordpress" => {
             let mut out = vec![];
@@ -611,14 +643,14 @@ pub enum Keep {
 pub fn keep_rules(id: &str, kind: &str) -> Vec<(&'static str, Keep)> {
     match id {
         "apache" => vec![("conf", Keep::Copy), ("logs", Keep::Move)],
-        "php" => vec![("php.ini", Keep::Copy)],
+        "php" => vec![("php.ini", Keep::Copy), ("php-fpm.conf", Keep::Copy)],
         "mariadb" => vec![("my.ini", Keep::Copy), ("data", if kind == "patch" { Keep::Move } else { Keep::Copy })],
         "phpmyadmin" => vec![("config.inc.php", Keep::Copy)],
         "tomcat" => vec![("conf", Keep::Copy), ("webapps", Keep::Copy), ("logs", Keep::Move)],
         "mailpit" => vec![("mailpit.db", Keep::Move)],
         // the database, its settings and the host keys SFTPGo made for itself
         "sftpgo" => vec![("sftpgo.db", Keep::Move), ("sftpgo.json", Keep::Copy), ("id_rsa", Keep::Copy), ("id_rsa.pub", Keep::Copy), ("id_ecdsa", Keep::Copy), ("id_ecdsa.pub", Keep::Copy), ("id_ed25519", Keep::Copy), ("id_ed25519.pub", Keep::Copy)],
-        "composer" => vec![("composer.bat", Keep::Copy)],
+        "composer" => vec![(if cfg!(windows) { "composer.bat" } else { "composer" }, Keep::Copy)],
         _ => vec![],
     }
 }
@@ -766,7 +798,7 @@ pub fn verify_install(c: &Component, root: &Path, want: &str) -> Result<Vec<Stri
             // start it once with the user's own settings, upgrade the system tables, stop it again
             start(c, root).map_err(|e| format!("MariaDB does not start: {e}"))?;
             let port = c.port.to_string();
-            let up = run_capture(&root.join(c.extract_to.as_str()).join("bin/mariadb-upgrade.exe"), &["--user=root", "--host=127.0.0.1", &format!("--port={port}")]);
+            let up = run_capture(&root.join(c.extract_to.as_str()).join("bin").join(crate::exe("mariadb-upgrade")), &["--user=root", "--host=127.0.0.1", &format!("--port={port}")]);
             if !up.as_deref().is_some_and(|o| !o.to_lowercase().contains("error")) {
                 warnings.push(format!("mariadb-upgrade reported a problem: {}", up.unwrap_or_default().trim().lines().last().unwrap_or("it did not run")));
             }

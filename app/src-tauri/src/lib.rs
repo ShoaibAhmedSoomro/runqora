@@ -426,6 +426,12 @@ pub fn extra_conf_with(root: &Path, settings: &Settings) -> String {
     if let Some(port) = https {
         s += &https::apache_block(root, port, &doc, &sites);
     }
+    #[cfg(unix)]
+    if root.join("php/php-fpm").exists() {
+        let port = component_with("php", settings).map(|c| c.port).unwrap_or(9074);
+        s += &format!("<IfModule !proxy_module>\n    LoadModule proxy_module modules/mod_proxy.so\n</IfModule>\n<IfModule !proxy_fcgi_module>\n    LoadModule proxy_fcgi_module modules/mod_proxy_fcgi.so\n</IfModule>\n<FilesMatch \\.php$>\n    SetHandler \"proxy:fcgi://127.0.0.1:{port}\"\n</FilesMatch>\nDirectoryIndex index.php index.html\n");
+    }
+    #[cfg(windows)]
     if root.join("php/php8apache2_4.dll").exists() {
         // PHP's own libraries (ICU for intl, libssh2 and nghttp2 for curl, sodium...) sit next to php.exe, which Apache does
         // not search; without these lines those extensions fail to load inside Apache although `php -m` shows them
@@ -466,7 +472,7 @@ pub fn configure_php_ini(ini: &str, php_dir: &Path) -> String {
     fn ext(l: &str) -> Option<(&str, bool)> {
         let commented = l.starts_with(';');
         let name = l.trim_start_matches(';').trim().strip_prefix("extension=")?.split([' ', '\t', ';']).next()?;
-        EXT.contains(&name).then_some((name, commented))
+        (cfg!(windows) && EXT.contains(&name)).then_some((name, commented)) // the Unix PHP has its extensions built in
     }
     let lines: Vec<&str> = ini.lines().collect();
     // the template mentions some extensions in prose before the real list: enable each name once, at its last mention
@@ -487,6 +493,12 @@ pub fn configure_php_ini(ini: &str, php_dir: &Path) -> String {
         .collect::<Vec<_>>()
         .join("\n")
         + "\n"
+}
+
+/// The PHP FastCGI pool Apache talks to: this PC only, a few workers, started and stopped by Runqora.
+pub fn php_fpm_conf(dir: &Path, port: u16) -> String {
+    let d = fwd(dir);
+    format!("[global]\npid = {d}/php-fpm.pid\nerror_log = {d}/php-fpm.log\ndaemonize = no\n\n[www]\nlisten = 127.0.0.1:{port}\npm = dynamic\npm.max_children = 8\npm.start_servers = 2\npm.min_spare_servers = 1\npm.max_spare_servers = 3\nclear_env = no\ncatch_workers_output = yes\n")
 }
 
 pub fn random_hex(bytes: usize) -> Result<String, String> {
@@ -527,6 +539,11 @@ pub fn post_install(c: &Component, root: &Path) -> Result<(), String> {
         "php" => {
             let dev = fs::read_to_string(dir.join("php.ini-development")).map_err(|e| e.to_string())?;
             write_new(dir.join("php.ini"), configure_php_ini(&dev, &dir))?;
+            #[cfg(unix)]
+            {
+                let port = component("php").map(|p| p.port).unwrap_or(9074);
+                write_new(dir.join("php-fpm.conf"), php_fpm_conf(&dir, port))?;
+            }
         }
         "phpmyadmin" => {
             let tmp = root.join("tmp/phpmyadmin");
@@ -541,15 +558,21 @@ pub fn post_install(c: &Component, root: &Path) -> Result<(), String> {
         }
         "mariadb" => {
             let r = fwd(&dir);
+            let sock = if cfg!(unix) { format!("socket=\"{r}/data/mysql.sock\"\n") } else { String::new() };
             let ini = format!(
-                "[client]\nport={p}\n\n[mysqld]\nport={p}\nbind-address=127.0.0.1\nbasedir=\"{r}\"\ndatadir=\"{r}/data\"\npid-file=\"{r}/data/mysql.pid\"\nlog-error=\"{r}/data/mysql_error.log\"\ncharacter-set-server=utf8mb4\n",
+                "[client]\nport={p}\n{sock}\n[mysqld]\nport={p}\n{sock}bind-address=127.0.0.1\nbasedir=\"{r}\"\ndatadir=\"{r}/data\"\npid-file=\"{r}/data/mysql.pid\"\nlog-error=\"{r}/data/mysql_error.log\"\ncharacter-set-server=utf8mb4\n",
                 p = c.port
             );
             write_new(dir.join("my.ini"), ini)?;
             if !dir.join("data/mysql").is_dir() {
                 // the zip ships no initialised data directory
-                let out = Command::new(dir.join("bin").join(exe("mariadb-install-db")))
-                    .arg(format!("--datadir={r}/data"))
+                let mut cmd = Command::new(dir.join("bin").join(exe("mariadb-install-db")));
+                cmd.arg(format!("--datadir={r}/data"));
+                if cfg!(unix) {
+                    // root without a password over TCP like the Windows build (the default there is the unix socket)
+                    cmd.args([format!("--basedir={r}"), "--auth-root-authentication-method=normal".into(), "--skip-test-db".into()]);
+                }
+                let out = cmd
                     .stdin(Stdio::null())
                     .creation_flags(NO_WINDOW)
                     .output()
@@ -569,7 +592,7 @@ pub fn post_install(c: &Component, root: &Path) -> Result<(), String> {
             #[cfg(unix)]
             {
                 use std::os::unix::fs::PermissionsExt;
-                let sh = format!("#!/bin/sh\nexec \"{}/php/php\" \"$(dirname \"$0\")/composer.phar\" \"$@\"\n", fwd(root));
+                let sh = format!("#!/bin/sh\nPHPRC=\"{r}/php\" exec \"{r}/php/php\" \"$(dirname \"$0\")/composer.phar\" \"$@\"\n", r = fwd(root));
                 let f = dir.join("composer");
                 fs::write(&f, sh).map_err(|e| e.to_string())?;
                 fs::set_permissions(&f, fs::Permissions::from_mode(0o755)).map_err(|e| e.to_string())?;
@@ -1363,6 +1386,13 @@ pub fn start(c: &Component, root: &Path) -> Result<String, String> {
     let _ = fs::remove_file(root.join(&c.pidfile)); // stale pid from a crash
     if c.id == "apache" {
         migrate_legacy_conf(root);
+        // PHP pages are answered by PHP-FPM here, so it runs whenever Apache does
+        #[cfg(unix)]
+        if let Ok(p) = component("php") {
+            if p.args.is_some() && state(&p, root).status == "stopped" {
+                let _ = start(&p, root);
+            }
+        }
     }
     let mut note = String::new();
     match c.service.as_ref().filter(|sv| s.service_installed && !sv.name.is_empty()) {

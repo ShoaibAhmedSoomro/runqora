@@ -153,7 +153,7 @@ pub fn wordpress_create(root: &Path, name: &str) -> Result<String, String> {
     let db = db_name(&name);
     let sample = fs::read_to_string(master.join("wp-config-sample.php")).map_err(|e| e.to_string())?;
     let config = wp_config(&sample, &db, maria.port, || random_hex(32))?; // before anything is created
-    let client = ["mariadb.exe", "mysql.exe"].iter().map(|f| root.join("mariadb/bin").join(f)).find(|p| p.exists()).ok_or("MariaDB's command line client is missing")?;
+    let client = [crate::exe("mariadb"), crate::exe("mysql")].iter().map(|f| root.join("mariadb/bin").join(f)).find(|p| p.exists()).ok_or("MariaDB's command line client is missing")?;
     let sql = |q: String| -> Result<(), String> {
         let o = Command::new(&client).args(["-h127.0.0.1", &format!("-P{}", maria.port), "-uroot", "-e", &q]).stdin(Stdio::null()).creation_flags(NO_WINDOW).output().map_err(|e| e.to_string())?;
         if o.status.success() { Ok(()) } else { Err(String::from_utf8_lossy(&o.stderr).trim().to_string()) }

@@ -1,0 +1,33 @@
+name: Publish stack
+# Publishes the bundles built by earlier Stack runs as release stack-<n>. Triggered by changing e2e/publish-stack.txt:
+# one line "<n>", then one line per program "<program> <Stack run number>".
+on:
+  push:
+    branches: [crossplatform]
+    paths: ["e2e/publish-stack.txt"]
+permissions:
+  contents: write
+  actions: read
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Collect the bundles
+        run: |
+          n=$(head -1 e2e/publish-stack.txt | tr -d '[:space:]')
+          mkdir dist
+          tail -n +2 e2e/publish-stack.txt | while read -r p run; do
+            [ -n "$p" ] || continue
+            for plat in linux-x86_64 linux-aarch64 macos-aarch64; do gh run download "$run" --repo "$GITHUB_REPOSITORY" -n "$p-$plat" -D dist; done
+          done
+          ls -l dist
+          [ "$(ls dist/*.tar.gz | wc -l)" = 9 ]
+          python3 scripts/stack/stack-json.py dist "$n"
+      - name: Create the release
+        run: |
+          n=$(head -1 e2e/publish-stack.txt | tr -d '[:space:]')
+          gh release create "stack-$n" --repo "$GITHUB_REPOSITORY" --prerelease --title "Stack $n" \
+            --notes "Apache, PHP and MariaDB builds for Linux and macOS that Runqora installs. Built by the Stack workflow." dist/*.tar.gz dist/stack.json

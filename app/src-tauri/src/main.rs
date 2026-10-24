@@ -392,12 +392,13 @@ struct AppInfo {
     version: &'static str,
     root: String,
     cli: String,
+    os: &'static str,
 }
 
 #[tauri::command]
 fn app_info() -> AppInfo {
     let cli = std::env::current_exe().ok().and_then(|p| p.parent().map(|d| d.join(rt::exe("rq")))).map(|p| p.to_string_lossy().into_owned()).unwrap_or_default();
-    AppInfo { version: env!("CARGO_PKG_VERSION"), root: rt::root().to_string_lossy().into_owned(), cli }
+    AppInfo { version: env!("CARGO_PKG_VERSION"), root: rt::root().to_string_lossy().into_owned(), cli, os: std::env::consts::OS }
 }
 
 #[tauri::command]

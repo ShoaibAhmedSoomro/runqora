@@ -162,7 +162,7 @@ if (!window.__TAURI__) {
       case "port_end": { const m = mods.find((x) => x.status === "blocked"); if (m) { m.status = "stopped"; m.blocker = null; } problems = problems.filter((p) => !p.port); return "mysqld.exe was ended and its port is free"; }
       case "port_stop_service": return `The ${a.name} service was stopped and its port is free`;
       case "port_suggest": return a.id === "apache" ? 8080 : 3307;
-      case "app_info": return { version: "0.1.0", root: "C:\\runqora", cli: "C:\\Program Files\\Runqora\\rq.exe" };
+      case "app_info": return { os: "windows", version: "0.1.0", root: "C:\\runqora", cli: "C:\\Program Files\\Runqora\\rq.exe" };
       case "ports_scan": return [
         { port: 80, pid: 4242, name: "httpd.exe", path: "C:\\runqora\\apache\\bin\\httpd.exe", ours: true, module: "Apache HTTP Server" },
         { port: 135, pid: 1700, name: "svchost.exe", path: "", ours: false, module: null },

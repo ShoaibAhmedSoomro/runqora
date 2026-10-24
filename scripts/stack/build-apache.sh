@@ -32,6 +32,9 @@ rm -rf "$A/manual" "$A/cgi-bin" "$A/include" "$A/build" "$A/error/include"
 mkdir -p "$A/logs" "$A/htdocs"
 echo "$HTTPD" > "$A/.bundle-version"
 "$A/bin/httpd" -v | head -1
-( cd "$A/modules" && ls | grep -E 'mod_(ssl|proxy_fcgi|rewrite|headers)\.so' ) | sort | tr '\n' ' '; echo
+ls "$A/modules" | tr "[:space:]" " "; echo
+for m in mod_ssl mod_proxy mod_proxy_fcgi mod_rewrite mod_headers mod_unixd; do
+  [ -f "$A/modules/$m.so" ] || { echo "missing $m.so (the build did not make it)" >&2; exit 1; }
+done
 tar -C "$A" -czf "$W/../dist/apache-$HTTPD-$PLAT.tar.gz" .
 sha256 "$W/../dist/apache-$HTTPD-$PLAT.tar.gz"

@@ -68,7 +68,7 @@ apache = built("apache", "Apache HTTP Server", extract_to="apache", binary="apac
                pidfile="apache/logs/httpd.pid", port=8000, admin_url="http://localhost:{port}/", configs=W["apache"]["configs"], logs=W["apache"]["logs"])
 php = built("php", "PHP (FPM)", extract_to="php", binary="php/php-fpm", args=["--nodaemonize", "--fpm-config", "{root}/php/php-fpm.conf", "-c", "{root}/php/php.ini"],
             pidfile="php/php-fpm.pid", port=9074, configs=["php/php.ini", "php/php-fpm.conf"], logs=["php/php-fpm.log"])
-maria = built("mariadb", "MariaDB", extract_to="mariadb", binary="mariadb/bin/mariadbd", args=["--defaults-file={root}/mariadb/my.ini", "--standalone"],
+maria = built("mariadb", "MariaDB", extract_to="mariadb", binary="mariadb/bin/mariadbd", args=["--defaults-file={root}/mariadb/my.ini"],
               pidfile="mariadb/data/mysql.pid", port=3306, admin_url=W["mariadb"]["admin_url"], configs=["mariadb/my.ini"], logs=["mariadb/data/mysql_error.log"])
 comps = [c for c in (apache, php, maria) if c["variants"]] + comps  # hidden until the stack workflow has published them
 

@@ -58,16 +58,16 @@ const NOTE = {
   jre: "Java for Tomcat. Installed for you the first time you install Tomcat.",
   tomcat: "Runs Java web applications (.war files go in the tomcat/webapps folder). Needs the Java runtime, which Install adds.",
   mailpit: "Catches every email your PHP sites send and shows it on the Open page, so nothing leaves this PC. PHP is pointed at it for you (SMTP port 1025).",
-  sftpgo: "FTP on port 21 and SFTP on port 2022, this PC only. The first time you Open it, it asks you to make an admin account.",
+  sftpgo: "FTP and SFTP, this computer only (21 and 2022 on Windows, 2121 and 2022 elsewhere). The first time you Open it, it asks you to make an admin account.",
   wordpress: "The WordPress files. New WordPress site copies them into a new site, makes its database and fills in wp-config.php.",
   node: "Node.js with npm, for build tools and JavaScript servers. Runqora keeps the long-term-support line current.",
-  composer: "PHP's package manager. In a terminal: C:\\Runqora\\composer\\composer.bat install (it runs on Runqora's PHP).",
+  composer: "PHP's package manager. In a terminal, run composer from Runqora's composer folder (composer.bat on Windows, composer on Linux and macOS); it runs on Runqora's PHP.",
   adminer: "A one-file database tool at http://localhost/adminer/adminer.php (this PC only). It refuses accounts without a password; for the password-less root account use phpMyAdmin.",
 };
 const STATUS = { missing: "Not installed", installed: "Installed", stopped: "Stopped", running: "Running", blocked: "Port in use" };
 const G = { play: 0xe768, stop: 0xe71a, globe: 0xe774, page: 0xe7c3, down: 0xe70d, download: 0xe896, ok: 0xe930, err: 0xea39, warn: 0xe7ba, info: 0xe946, close: 0xe711, folder: 0xe8b7, sync: 0xe895, back: 0xe7a7, link: 0xe71b };
 
-const view = { stars: null, progress: {}, appUpdate: null, appVersion: "", modules: [], externals: [], sites: [], loaded: false, entered: false, updEntered: false, updates: null, checking: false, checkedAt: null, autoMode: "notify", settingsTab: "general", problems: 0, page: "modules", open: new Set(), busy: new Map(), log: [], bars: [], errors: 0, json: "" };
+const view = { os: "windows", stars: null, progress: {}, appUpdate: null, appVersion: "", modules: [], externals: [], sites: [], loaded: false, entered: false, updEntered: false, updates: null, checking: false, checkedAt: null, autoMode: "notify", settingsTab: "general", problems: 0, page: "modules", open: new Set(), busy: new Map(), log: [], bars: [], errors: 0, json: "" };
 
 // ---- progress: what a download or update is doing, shown on the card that started it ----
 const MB = (n) => (n / 1048576).toFixed(n < 10485760 ? 1 : 0);
@@ -407,7 +407,7 @@ async function paintAbout() {
   $("#about").replaceChildren(
     h("div", { class: "card about-hero span" },
       h("img", { class: "app-logo", src: "logos/runqora.svg", alt: "" }),
-      h("div", { class: "meta" }, h("div", { class: "strong big" }, "Runqora"), h("div", { class: "muted" }, `Version ${info.version} · a local web stack for Windows`)),
+      h("div", { class: "meta" }, h("div", { class: "strong big" }, "Runqora"), h("div", { class: "muted" }, `Version ${info.version} · a local web stack for ${({ windows: "Windows", macos: "macOS", linux: "Linux" })[info.os] || "your computer"}`)),
       h("div", { class: "cta" },
         h("button", { class: "btn accent", on: { click: () => openDev("repo", "GitHub") } }, icon(0xe735), "Star on GitHub", starLabel()),
         h("button", { class: "btn", on: { click: () => goto("updates") } }, icon(G.sync), "Check for updates"),
@@ -470,7 +470,7 @@ async function afterPortChange() {
 }
 
 async function endProgram(m, pid, rem) {
-  const ok = await dialog({ title: `End ${rem.name}?`, content: [h("p", {}, rem.detail), h("p", { class: "muted small" }, "Windows may ask for administrator approval if the program belongs to another account.")], confirm: `End ${rem.name}` });
+  const ok = await dialog({ title: `End ${rem.name}?`, content: [h("p", {}, rem.detail), h("p", { class: "muted small" }, (view.os === "windows" ? "Windows may ask for administrator approval if the program belongs to another account." : "A program that belongs to another account cannot be ended from here."))], confirm: `End ${rem.name}` });
   if (!ok) return;
   try { note("success", "", await invoke("port_end", { pid })); } catch (e) { note("error", `Couldn't end ${rem.name}.`, String(e)); }
   afterPortChange();
@@ -651,7 +651,7 @@ async function httpsCard(fields) {
     rows.push(setRow(s.trusted ? "Trusted on this PC" : "Not trusted yet", s.trusted ? "Browsers on this PC accept your sites with no warning." : "Until you trust it, browsers warn \u201cNot secure\u201d. Trusting adds Runqora's private authority to your own certificate store only.", s.trusted
       ? h("button", { class: "btn sm", on: { click: async () => { try { note("success", "", await invoke("https_untrust")); } catch (e) { note("error", "Couldn't remove trust.", String(e)); } paintSettings(); } } }, "Remove trust")
       : h("button", { class: "btn sm accent", on: { click: async () => {
-          const ok = await dialog({ title: "Trust the Runqora certificate?", content: [h("p", {}, "Windows will show its own confirmation. If you accept, this PC trusts certificates made by Runqora's private authority \u201cRunqora Local CA\u201d, for your account only."), h("p", { class: "muted small" }, "The authority's key never leaves your install folder. You can remove trust here at any time.")], confirm: "Continue" });
+          const ok = await dialog({ title: "Trust the Runqora certificate?", content: [h("p", {}, (view.os === "windows" ? "Windows will show its own confirmation. " : view.os === "macos" ? "macOS will ask for your password. " : "Chrome, Chromium and Edge read this trust list (Firefox has its own). ") + "If you accept, this computer trusts certificates made by Runqora's private authority \u201cRunqora Local CA\u201d, for your account only."), h("p", { class: "muted small" }, "The authority's key never leaves your install folder. You can remove trust here at any time.")], confirm: "Continue" });
           if (!ok) return;
           try { note("success", "", await invoke("https_trust")); } catch (e) { note("error", "Not trusted.", String(e)); }
           paintSettings();
@@ -955,7 +955,7 @@ note("info", "", "Ready.");
 refresh(true);
 refreshProblems();
 loadAppearance();
-invoke("app_info").then((i) => (view.appVersion = i.version)).catch(() => {});
+invoke("app_info").then((i) => { view.appVersion = i.version; view.os = i.os || "windows"; }).catch(() => {});
 invoke("settings_get").then((s) => {
   view.autoMode = ["off", "notify", "install"].includes(s.auto_update) ? s.auto_update : "install";
   if (view.autoMode !== "off") {

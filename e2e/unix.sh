@@ -14,7 +14,17 @@ check() { # check "what" command...
 }
 listening() { (exec 3<>/dev/tcp/127.0.0.1/$1) 2>/dev/null; }
 page() { curl -fsS --max-time 60 "$@"; }
-trap '"$RQ" stop >/dev/null 2>&1; rm -rf "$RUNQORA_DIR"' EXIT
+diagnose() {
+  echo; echo "===== diagnostics ====="
+  "$RQ" status 2>&1 | head -20
+  for f in apache/logs/error_log php/php-fpm.log mariadb/data/mysql_error.log; do
+    [ -f "$RUNQORA_DIR/$f" ] && { echo "--- $f"; tail -25 "$RUNQORA_DIR/$f"; }
+  done
+  [ -x "$RUNQORA_DIR/apache/bin/httpd" ] && { echo "--- httpd -t"; "$RUNQORA_DIR/apache/bin/httpd" -d "$RUNQORA_DIR/apache" -t 2>&1 | head -20; }
+  [ -f "$RUNQORA_DIR/apache/conf/extra/runqora.conf" ] && { echo "--- runqora.conf"; cat "$RUNQORA_DIR/apache/conf/extra/runqora.conf"; }
+  ls -la "$RUNQORA_DIR" "$RUNQORA_DIR/mariadb" "$RUNQORA_DIR/mariadb/bin" 2>&1 | head -60
+}
+trap '[ "$fail" -gt 0 ] && diagnose; "$RQ" stop >/dev/null 2>&1; rm -rf "$RUNQORA_DIR"' EXIT
 
 echo "install into $RUNQORA_DIR"
 for m in $MODULES; do check "install $m" "$RQ" install "$m"; done

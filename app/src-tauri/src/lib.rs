@@ -570,7 +570,9 @@ pub fn post_install(c: &Component, root: &Path) -> Result<(), String> {
             write_new(dir.join("my.ini"), ini)?;
             if !dir.join("data/mysql").is_dir() {
                 // the zip ships no initialised data directory
-                let mut cmd = Command::new(dir.join("bin").join(exe("mariadb-install-db")));
+                // the Unix build keeps its setup script in scripts/, the Windows one in bin/
+                let tool = [dir.join("bin"), dir.join("scripts")].into_iter().map(|d| d.join(exe("mariadb-install-db"))).find(|p| p.exists()).unwrap_or_else(|| dir.join("bin").join(exe("mariadb-install-db")));
+                let mut cmd = Command::new(tool);
                 cmd.arg(format!("--datadir={r}/data"));
                 if cfg!(unix) {
                     // root without a password over TCP like the Windows build (the default there is the unix socket)

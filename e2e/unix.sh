@@ -6,7 +6,7 @@ set -u
 RQ=$1; export RUNQORA_MANIFEST=$2; shift 2
 MODULES=${*:-apache php mariadb phpmyadmin}
 export RUNQORA_DIR; RUNQORA_DIR=$(mktemp -d)
-export RUNQORA_PORT_APACHE=18080 RUNQORA_PORT_PHP=19074 RUNQORA_PORT_MARIADB=13306
+export RUNQORA_PORT_APACHE=18080 RUNQORA_PORT_PHP=19074 RUNQORA_PORT_MARIADB=13306 RUNQORA_PORT_MAILPIT=18025 RUNQORA_PORT_TOMCAT=18081 RUNQORA_PORT_SFTPGO=18082
 pass=0; fail=0
 check() { # check "what" command...
   local what=$1; shift
@@ -17,7 +17,7 @@ page() { curl -fsS --max-time 60 "$@"; }
 diagnose() {
   echo; echo "===== diagnostics ====="
   "$RQ" status 2>&1 | head -20
-  for f in apache/logs/error_log php/php-fpm.log mariadb/data/mysql_error.log; do
+  for f in apache/logs/error_log php/php-fpm.log mariadb/data/mysql_error.log tomcat/logs/catalina.out; do
     [ -f "$RUNQORA_DIR/$f" ] && { echo "--- $f"; tail -25 "$RUNQORA_DIR/$f"; }
   done
   [ -x "$RUNQORA_DIR/apache/bin/httpd" ] && { echo "--- httpd -t"; "$RUNQORA_DIR/apache/bin/httpd" -d "$RUNQORA_DIR/apache" -t 2>&1 | head -20; }
@@ -59,7 +59,6 @@ check "an HTTPS certificate can be made" bash -c "'$RQ' https regenerate | grep 
 check "doctor finds nothing broken" bash -c "'$RQ' doctor | grep -vi 'problem' >/dev/null"
 
 has() { case " $MODULES " in *" $1 "*) return 0;; esac; return 1; }
-export RUNQORA_PORT_MAILPIT=18025 RUNQORA_PORT_TOMCAT=18081 RUNQORA_PORT_SFTPGO=18082
 
 echo "settings and sites"
 check "a PHP setting is written to php.ini" bash -c "'$RQ' config set php memory_limit 384M && grep -q '^memory_limit *= *384M' '$RUNQORA_DIR/php/php.ini'"
@@ -98,7 +97,7 @@ if has wordpress; then
   echo "wordpress"
   "$RQ" start mariadb >/dev/null 2>&1
   check "a WordPress site can be made" "$RQ" wordpress blog
-  check "its files exist" test -f "$RUNQORA_DIR/sites/blog/wp-config.php"
+  check "its files exist" test -f "$RUNQORA_DIR/htdocs/blog/wp-config.php"
   "$RQ" stop >/dev/null 2>&1
 fi
 

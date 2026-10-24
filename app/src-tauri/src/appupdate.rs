@@ -11,7 +11,17 @@ use std::process::Command;
 
 const RELEASE_API: &str = "https://api.github.com/repos/ShoaibAhmedSoomro/runqora/releases/latest";
 const DOWNLOAD_PREFIX: &str = "https://github.com/ShoaibAhmedSoomro/runqora/releases/download/";
+/// The file of the release that this system installs: the setup program, a disk image, or a Linux package.
+#[cfg(windows)]
 const ASSET: &str = "Runqora-Setup-x64.exe";
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+const ASSET: &str = "Runqora-macos-aarch64.dmg";
+#[cfg(all(target_os = "macos", not(target_arch = "aarch64")))]
+const ASSET: &str = "Runqora-macos-x86_64.dmg";
+#[cfg(all(target_os = "linux", target_arch = "aarch64"))]
+const ASSET: &str = "Runqora-linux-aarch64.AppImage";
+#[cfg(all(target_os = "linux", not(target_arch = "aarch64")))]
+const ASSET: &str = "Runqora-linux-x86_64.AppImage";
 
 #[derive(Serialize, Clone, Debug, PartialEq)]
 pub struct AppUpdate {
@@ -65,9 +75,27 @@ pub fn install() -> Result<String, String> {
         return Err(e);
     }
     crate::progress_set("app", "Opening the installer", 0, 0);
-    // /UPDATE: the installer replaces the files in place (no uninstall first, no questions) and keeps everything else
-    Command::new(&file).arg("/UPDATE").spawn().map_err(|e| format!("could not start the installer: {e}"))?;
-    Ok(format!("The Runqora {} installer is open. Runqora closes now; finish the installer and it opens again.", u.latest))
+    #[cfg(windows)]
+    {
+        // /UPDATE: the installer replaces the files in place (no uninstall first, no questions) and keeps everything else
+        Command::new(&file).arg("/UPDATE").spawn().map_err(|e| format!("could not start the installer: {e}"))?;
+        Ok(format!("The Runqora {} installer is open. Runqora closes now; finish the installer and it opens again.", u.latest))
+    }
+    #[cfg(unix)]
+    {
+        // a disk image or an AppImage is not something to replace while it runs: save it where the user looks and show it
+        let dest = std::path::PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join("Downloads");
+        std::fs::create_dir_all(&dest).map_err(|e| e.to_string())?;
+        let saved = dest.join(ASSET);
+        std::fs::rename(&file, &saved).or_else(|_| std::fs::copy(&file, &saved).map(|_| ())).map_err(|e| e.to_string())?;
+        #[cfg(target_os = "linux")]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(&saved, std::fs::Permissions::from_mode(0o755));
+        }
+        let _ = crate::open_folder(&dest);
+        Ok(format!("Runqora {} was saved to {}. Quit Runqora, then {}.", u.latest, saved.display(), if cfg!(target_os = "macos") { "open the disk image and drag Runqora over the old copy in Applications" } else { "run the new AppImage (or install it with your package manager)" }))
+    }
 }
 
 const REPO_API_INFO: &str = "https://api.github.com/repos/ShoaibAhmedSoomro/runqora";
@@ -95,24 +123,26 @@ mod tests {
     use super::*;
 
     fn release(tag: &str, url: &str, digest: &str) -> String {
-        format!(r#"{{"tag_name":"{tag}","html_url":"https://github.com/ShoaibAhmedSoomro/runqora/releases/tag/{tag}","published_at":"2026-11-01T10:00:00Z","body":"Fixes and a new module.","assets":[{{"name":"SHA256.txt","browser_download_url":"x","digest":"sha256:00"}},{{"name":"Runqora-Setup-x64.exe","browser_download_url":"{url}","digest":"{digest}"}}]}}"#)
+        format!(r#"{{"tag_name":"{tag}","html_url":"https://github.com/ShoaibAhmedSoomro/runqora/releases/tag/{tag}","published_at":"2026-11-01T10:00:00Z","body":"Fixes and a new module.","assets":[{{"name":"SHA256.txt","browser_download_url":"x","digest":"sha256:00"}},{{"name":"{ASSET}","browser_download_url":"{url}","digest":"{digest}"}}]}}"#)
     }
-    const OK_URL: &str = "https://github.com/ShoaibAhmedSoomro/runqora/releases/download/v0.2.0/Runqora-Setup-x64.exe";
+    fn ok_url() -> String {
+        format!("https://github.com/ShoaibAhmedSoomro/runqora/releases/download/v0.2.0/{ASSET}")
+    }
 
     #[test]
     fn a_newer_release_is_offered_with_its_digest() {
-        let u = parse_release(&release("v0.2.0", OK_URL, "sha256:ABCD"), "0.1.1").unwrap();
-        assert_eq!((u.latest.as_str(), u.current.as_str(), u.sha256.as_str(), u.url.as_str()), ("0.2.0", "0.1.1", "abcd", OK_URL));
+        let u = parse_release(&release("v0.2.0", &ok_url(), "sha256:ABCD"), "0.1.1").unwrap();
+        assert_eq!((u.latest.as_str(), u.current.as_str(), u.sha256.as_str(), u.url.as_str()), ("0.2.0", "0.1.1", "abcd", ok_url().as_str()));
         assert!(u.notes_url.ends_with("/tag/v0.2.0") && u.body.contains("new module"));
     }
 
     #[test]
     fn same_older_or_unsafe_releases_are_not_offered() {
-        assert!(parse_release(&release("v0.2.0", OK_URL, "sha256:ab"), "0.2.0").is_none(), "same version");
-        assert!(parse_release(&release("v0.2.0", OK_URL, "sha256:ab"), "0.10.0").is_none(), "0.10 is newer than 0.2");
-        assert!(parse_release(&release("v0.2.0", "https://evil.example/Runqora-Setup-x64.exe", "sha256:ab"), "0.1.0").is_none(), "another host");
-        assert!(parse_release(&release("v0.2.0", "https://github.com/someone-else/runqora/releases/download/v0.2.0/Runqora-Setup-x64.exe", "sha256:ab"), "0.1.0").is_none(), "another repository");
-        assert!(parse_release(&release("v0.2.0", OK_URL, "md5:ab"), "0.1.0").is_none(), "no SHA-256 to check");
+        assert!(parse_release(&release("v0.2.0", &ok_url(), "sha256:ab"), "0.2.0").is_none(), "same version");
+        assert!(parse_release(&release("v0.2.0", &ok_url(), "sha256:ab"), "0.10.0").is_none(), "0.10 is newer than 0.2");
+        assert!(parse_release(&release("v0.2.0", &format!("https://evil.example/{ASSET}"), "sha256:ab"), "0.1.0").is_none(), "another host");
+        assert!(parse_release(&release("v0.2.0", &format!("https://github.com/someone-else/runqora/releases/download/v0.2.0/{ASSET}"), "sha256:ab"), "0.1.0").is_none(), "another repository");
+        assert!(parse_release(&release("v0.2.0", &ok_url(), "md5:ab"), "0.1.0").is_none(), "no SHA-256 to check");
         assert!(parse_release("not json", "0.1.0").is_none() && parse_release(r#"{"tag_name":"v9.0.0","assets":[]}"#, "0.1.0").is_none(), "no installer attached");
     }
 

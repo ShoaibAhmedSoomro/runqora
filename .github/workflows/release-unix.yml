@@ -1,0 +1,52 @@
+name: Release Linux and macOS
+# Attaches the Linux and macOS packages to an existing release (the Windows installer is built and published by
+# scripts/release.ps1). Run by hand: Actions > Release Linux and macOS > Run workflow, with the tag, e.g. v0.3.0.
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag that already exists, e.g. v0.3.0"
+        required: true
+permissions:
+  contents: write
+jobs:
+  package:
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - { plat: linux-x86_64, runner: ubuntu-22.04, bundles: "deb,appimage" }
+          - { plat: linux-aarch64, runner: ubuntu-22.04-arm, bundles: "deb,appimage" }
+          - { plat: macos-aarch64, runner: macos-14, bundles: "dmg" }
+    runs-on: ${{ matrix.os.runner }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
+      - name: Linux libraries
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libgtk-3-dev patchelf libssl-dev xdg-utils
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: app/src-tauri
+      - name: Build
+        working-directory: app/src-tauri
+        run: |
+          cargo build --release
+          npx --yes @tauri-apps/cli@2.12.4 build --bundles ${{ matrix.os.bundles }}
+      - name: Name the files and upload them
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir out
+          b=app/src-tauri/target/release/bundle
+          ls -R $b | head -40
+          if [ "${{ runner.os }}" = macOS ]; then cp $b/dmg/*.dmg "out/Runqora-${{ matrix.os.plat }}.dmg"; else
+            cp $b/deb/*.deb "out/Runqora-${{ matrix.os.plat }}.deb"
+            cp $b/appimage/*.AppImage "out/Runqora-${{ matrix.os.plat }}.AppImage"
+          fi
+          ls -l out
+          gh release upload "${{ inputs.tag }}" out/* --repo "$GITHUB_REPOSITORY" --clobber

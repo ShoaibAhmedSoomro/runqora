@@ -34,10 +34,14 @@ rm -rf "$A/manual" "$A/cgi-bin" "$A/include" "$A/build" "$A/error/include"
 mkdir -p "$A/logs" "$A/htdocs"
 echo "$HTTPD" > "$A/.bundle-version"
 "$A/bin/httpd" -v | head -1
-find "$A/modules" -name '*.so' | wc -l
-mods=$("$A/bin/httpd" -M 2>/dev/null || true)
+echo "--- installed:"; ls "$A" "$A/modules" | head -80
+echo "--- compiled in:"; "$A/bin/httpd" -l || true
+# read the stock config as if it sat where Runqora will put it
+sed "s|$PREFIX|$A|g" "$A/conf/httpd.conf" > "$W/check.conf"
+mods=$("$A/bin/httpd" -d "$A" -f "$W/check.conf" -M 2>&1 || true)
+echo "$mods" | head -80
 for m in ssl_module proxy_module proxy_fcgi_module rewrite_module headers_module unixd_module deflate_module; do
-  echo "$mods" | grep -q "$m" || { echo "$m is missing from this build:" >&2; echo "$mods" >&2; exit 1; }
+  echo "$mods" | grep -q "$m" || { echo "$m is missing from this build" >&2; exit 1; }
 done
 tar -C "$A" -czf "$W/../dist/apache-$HTTPD-$PLAT.tar.gz" .
 sha256 "$W/../dist/apache-$HTTPD-$PLAT.tar.gz"

@@ -24,11 +24,13 @@ jobs:
     runs-on: ${{ matrix.os.runner }}
     steps:
       - uses: actions/checkout@v4
-      - name: Fetch the bundles of the Stack run
+      - name: Fetch the bundles of the Stack run (unless the file says "published")
+        if: hashFiles('e2e/stack-run.txt') != '' && !startsWith(hashFiles('e2e/stack-run.txt'), 'x')
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           mkdir dist
+          if [ "$(head -1 e2e/stack-run.txt | tr -d '[:space:]')" = published ]; then echo "using the published stack-1 release"; exit 0; fi
           # e2e/stack-run.txt: one line per program, "<program> <Stack run number>"
           while read -r p run; do [ -n "$p" ] && gh run download "$run" --repo "$GITHUB_REPOSITORY" -n "$p-${{ matrix.os.plat }}" -D dist; done < e2e/stack-run.txt
           ls -l dist
@@ -44,12 +46,17 @@ jobs:
       - name: Build rq
         working-directory: app/src-tauri
         run: cargo build --bin rq
-      - name: Install from the bundles and test the whole stack
+      - name: Install and test the whole stack
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          python3 scripts/stack/stack-json.py dist local
-          (cd dist && python3 -m http.server 8765 --bind 127.0.0.1 >/dev/null 2>&1 &)
-          python3 scripts/gen-unix-manifest.py --stack dist/stack.json --url-base http://127.0.0.1:8765 --out "$RUNNER_TEMP/manifest.json"
+          if [ "$(head -1 e2e/stack-run.txt | tr -d '[:space:]')" = published ]; then
+            m=app/src-tauri/manifest.unix.json
+          else
+            python3 scripts/stack/stack-json.py dist local
+            (cd dist && python3 -m http.server 8765 --bind 127.0.0.1 >/dev/null 2>&1 &)
+            python3 scripts/gen-unix-manifest.py --stack dist/stack.json --url-base http://127.0.0.1:8765 --out "$RUNNER_TEMP/manifest.json"
+            m="$RUNNER_TEMP/manifest.json"
+          fi
           chmod +x e2e/unix.sh
-          e2e/unix.sh "$PWD/app/src-tauri/target/debug/rq" "$RUNNER_TEMP/manifest.json" apache php mariadb phpmyadmin composer node adminer mailpit jre tomcat sftpgo wordpress
+          e2e/unix.sh "$PWD/app/src-tauri/target/debug/rq" "$(realpath "$m")" apache php mariadb phpmyadmin composer node adminer mailpit jre tomcat sftpgo wordpress

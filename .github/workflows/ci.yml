@@ -3,6 +3,9 @@ on:
   push:
     branches: [main, crossplatform]
   pull_request:
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   check:
     strategy:

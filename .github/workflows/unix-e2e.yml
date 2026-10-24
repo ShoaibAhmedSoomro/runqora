@@ -1,10 +1,10 @@
 name: Unix end-to-end
-# Installs the stack bundles of an earlier Stack run (its number is in scripts/stack/stack-run.txt) with the current Runqora
+# Installs the stack bundles of an earlier Stack run (its number is in e2e/stack-run.txt) with the current Runqora
 # and tests Apache, PHP, MariaDB and phpMyAdmin through the command line. Fast to repeat while Runqora itself changes.
 on:
   push:
     branches: [crossplatform]
-    paths: ["app/src-tauri/**", "e2e/unix.sh", "scripts/stack/stack-run.txt", "scripts/gen-unix-manifest.py", ".github/workflows/unix-e2e.yml"]
+    paths: ["app/src-tauri/**", "e2e/unix.sh", "e2e/stack-run.txt", "scripts/gen-unix-manifest.py", ".github/workflows/unix-e2e.yml"]
   workflow_dispatch:
 permissions:
   contents: read
@@ -28,7 +28,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          run=$(tr -d '[:space:]' < scripts/stack/stack-run.txt)
+          run=$(tr -d '[:space:]' < e2e/stack-run.txt)
           mkdir dist
           for p in apache php mariadb; do gh run download "$run" --repo "$GITHUB_REPOSITORY" -n "$p-${{ matrix.os.plat }}" -D dist; done
           ls -l dist

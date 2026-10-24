@@ -110,6 +110,7 @@ fn field(text: &str, key: &str) -> Option<String> {
     text.lines().find_map(|l| l.trim().strip_prefix(key).map(|v| v.trim().to_string()))
 }
 
+#[cfg_attr(not(windows), allow(dead_code))]
 fn fingerprint(root: &Path, file: &str) -> Option<String> {
     openssl(root, &["x509", "-in", file, "-noout", "-fingerprint", "-sha1"]).ok().and_then(|t| field(&t, "sha1 Fingerprint=").or_else(|| field(&t, "SHA1 Fingerprint=")))
 }

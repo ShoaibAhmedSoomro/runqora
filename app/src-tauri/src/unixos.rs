@@ -1,6 +1,7 @@
 //! The Unix twin of the Windows `win` module: the same small set of helpers (who listens on a port, is a process alive,
 //! end it) built on signals, /proc and lsof, so the rest of Runqora does not care which system it runs on.
 
+#[cfg(target_os = "macos")]
 use std::process::{Command, Stdio};
 
 /// Every TCP listener (IPv4 and IPv6) as (port, pid). The pid is 0 for a listener of another user that we may not look into.

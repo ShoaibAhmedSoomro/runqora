@@ -102,6 +102,10 @@ pub struct Component {
     /// the download is one file (Composer, Adminer) saved as `binary`, not an archive
     #[serde(default)]
     pub single_file: bool,
+    /// per-platform downloads ("linux-x86_64", "linux-aarch64", "macos-aarch64"): the entry for this machine replaces the
+    /// fields it names; a component that lists variants but none for this machine is not offered here
+    #[serde(default)]
+    pub variants: BTreeMap<String, Variant>,
     /// also the "is installed" marker
     pub binary: String,
     /// None = library (no process): php, phpmyadmin. {root} is replaced.
@@ -165,8 +169,41 @@ pub struct State {
     pub configs: Vec<FileRef>,
     pub logs: Vec<FileRef>,}
 
+/// What a platform-specific download changes about a component.
+#[derive(Deserialize, Clone, Default)]
+pub struct Variant {
+    pub url: String,
+    #[serde(default)]
+    pub sha256: String,
+    #[serde(default)]
+    pub sha512: String,
+    #[serde(default)]
+    pub sha1: String,
+    pub strip_prefix: Option<String>,
+    pub version: Option<String>,
+}
+
+/// "linux-x86_64", "linux-aarch64", "macos-aarch64", "windows-x86_64"
+pub fn platform() -> String {
+    format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH)
+}
+
+/// The built-in manifest narrowed to this machine.
+pub fn manifest_for(text: &str, platform: &str) -> Manifest {
+    let mut m: Manifest = serde_json::from_str(text).expect("the built-in manifest must parse");
+    m.components.retain(|c| c.variants.is_empty() || c.variants.contains_key(platform));
+    for c in &mut m.components {
+        if let Some(v) = c.variants.get(platform).cloned() {
+            (c.url, c.sha256, c.sha512, c.sha1) = (v.url, v.sha256, v.sha512, v.sha1);
+            c.strip_prefix = v.strip_prefix.unwrap_or_else(|| c.strip_prefix.clone());
+            c.version = v.version.unwrap_or_else(|| c.version.clone());
+        }
+    }
+    m
+}
+
 pub fn manifest() -> Manifest {
-    serde_json::from_str(MANIFEST).expect("manifest.json is built in and must parse")
+    manifest_for(MANIFEST, &platform())
 }
 
 pub fn component(id: &str) -> Result<Component, String> {
@@ -724,6 +761,14 @@ pub fn unpack_to(zip_path: &Path, dest: &Path, strip_prefix: &str) -> Result<(),
 
 /// Like `unpack_to`, calling `on(files_done, files_total)` as it goes.
 pub fn unpack_to_with(zip_path: &Path, dest: &Path, strip_prefix: &str, on: &dyn Fn(u64, u64)) -> Result<(), String> {
+    let mut magic = [0u8; 6];
+    let _ = fs::File::open(zip_path).and_then(|mut f| f.read(&mut magic));
+    if magic[..2] == [0x1f, 0x8b] {
+        return unpack_tar(zip_path, dest, strip_prefix, on, false);
+    }
+    if magic == [0xfd, b'7', b'z', b'X', b'Z', 0] {
+        return unpack_tar(zip_path, dest, strip_prefix, on, true);
+    }
     let mut z = zip::ZipArchive::new(fs::File::open(zip_path).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
     let auto;
     let strip_prefix = if strip_prefix == "*" {
@@ -755,9 +800,87 @@ pub fn unpack_to_with(zip_path: &Path, dest: &Path, strip_prefix: &str, on: &dyn
         } else {
             fs::create_dir_all(out.parent().unwrap()).map_err(|e| e.to_string())?;
             io::copy(&mut f, &mut fs::File::create(&out).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+            #[cfg(unix)]
+            if let Some(mode) = f.unix_mode() {
+                use std::os::unix::fs::PermissionsExt;
+                let _ = fs::set_permissions(&out, fs::Permissions::from_mode(mode & 0o777));
+            }
         }
     }
     Ok(())
+}
+
+/// A .tar.gz or .tar.xz (what Linux and macOS programs come in), with the same rules as the zip path: one top folder can
+/// be dropped, nothing may land outside `dest`, and program files keep their run permission.
+fn unpack_tar(path: &Path, dest: &Path, strip_prefix: &str, on: &dyn Fn(u64, u64), xz: bool) -> Result<(), String> {
+    let es = |e: io::Error| e.to_string();
+    let plain = path.with_extension("tar.part");
+    if xz {
+        // the xz decoder works stream to stream; unpack it to a plain tar next to the download first
+        let mut r = io::BufReader::new(fs::File::open(path).map_err(es)?);
+        let mut w = io::BufWriter::new(fs::File::create(&plain).map_err(es)?);
+        lzma_rs::xz_decompress(&mut r, &mut w).map_err(|e| format!("could not read the xz archive: {e}"))?;
+        io::Write::flush(&mut w).map_err(es)?;
+    }
+    let src = if xz { plain.as_path() } else { path };
+    let open = || -> Result<tar::Archive<Box<dyn Read>>, String> {
+        let f = fs::File::open(src).map_err(es)?;
+        let r: Box<dyn Read> = if xz { Box::new(f) } else { Box::new(flate2::read::GzDecoder::new(f)) };
+        let mut a = tar::Archive::new(r);
+        a.set_preserve_permissions(true);
+        Ok(a)
+    };
+    // `./x` and `x` are the same; absolute paths and `..` are refused
+    let clean = |p: &Path| -> Result<PathBuf, String> {
+        let mut out = PathBuf::new();
+        for c in p.components() {
+            match c {
+                std::path::Component::Normal(n) => out.push(n),
+                std::path::Component::CurDir => {}
+                _ => return Err(format!("unsafe path in archive: {}", p.display())),
+            }
+        }
+        Ok(out)
+    };
+    let result = (|| {
+        let mut names: Vec<PathBuf> = vec![];
+        for e in open()?.entries().map_err(es)? {
+            names.push(clean(&e.map_err(es)?.path().map_err(es)?)?);
+        }
+        let strip = if strip_prefix == "*" {
+            let tops: std::collections::BTreeSet<_> = names.iter().filter_map(|n| n.components().next()).collect();
+            let nested = names.iter().filter(|n| !n.as_os_str().is_empty()).all(|n| n.components().count() > 1 || tops.len() == 1);
+            if tops.len() == 1 && nested { tops.into_iter().next().map(|c| PathBuf::from(c.as_os_str())).unwrap_or_default() } else { PathBuf::new() }
+        } else {
+            PathBuf::from(strip_prefix.trim_end_matches('/'))
+        };
+        let count = names.len() as u64;
+        let mut last = std::time::Instant::now();
+        for (i, e) in open()?.entries().map_err(es)?.enumerate() {
+            if last.elapsed() >= Duration::from_millis(100) {
+                on(i as u64, count);
+                last = std::time::Instant::now();
+            }
+            let mut e = e.map_err(es)?;
+            let Ok(rel) = names[i].strip_prefix(&strip) else { continue };
+            if rel.as_os_str().is_empty() {
+                continue;
+            }
+            let out = dest.join(rel);
+            match e.header().entry_type() {
+                tar::EntryType::Directory => fs::create_dir_all(&out).map_err(es)?,
+                tar::EntryType::Regular | tar::EntryType::Continuous | tar::EntryType::Symlink => {
+                    fs::create_dir_all(out.parent().unwrap_or(dest)).map_err(es)?;
+                    let _ = fs::remove_file(&out);
+                    e.unpack(&out).map_err(es)?;
+                }
+                _ => {} // hard links, devices: nothing Runqora's programs ship
+            }
+        }
+        Ok(())
+    })();
+    let _ = fs::remove_file(&plain);
+    result
 }
 
 pub fn sha256_file(p: &Path) -> io::Result<String> {
@@ -1956,6 +2079,7 @@ smtp_port = 1025
         let _ = fs::remove_dir_all(&root);
     }
 
+    #[cfg(windows)]
     #[test]
     fn registry_text_values_round_trip_in_a_throwaway_key() {
         // never the real Run key: a scratch key under HKCU that is emptied again
@@ -1969,6 +2093,7 @@ smtp_port = 1025
         let _ = launch_at_login();
     }
 
+    #[cfg(windows)]
     #[test]
     fn a_service_belongs_to_the_install_folder_it_runs_from() {
         let mine = Path::new(r"C:\Runqora");
@@ -2130,6 +2255,7 @@ smtp_port = 1025
         assert!(is_ours(r"C:\RT\apache\bin\httpd.exe", Path::new(r"c:\rt")) && !is_ours("", Path::new(r"c:\rt")) && !is_ours(r"C:\other\httpd.exe", Path::new(r"c:\rt")));
     }
 
+    #[cfg(windows)]
     #[test]
     fn service_lookup_and_params() {
         assert!(win::service_exists("EventLog") && !win::service_exists("RunqoraNoSuchService"));
@@ -2366,5 +2492,53 @@ smtp_port = 1025
         let (code, body) = pma.unwrap();
         assert!(code == 200 && body.contains("phpMyAdmin"));
         assert!(!port_in_use(18080) && !port_in_use(13306));
+    }
+}
+
+#[cfg(test)]
+mod platform_tests {
+    use super::*;
+
+    fn temp(name: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("rq-{name}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&d);
+        fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    #[test]
+    fn a_tar_gz_unpacks_with_its_top_folder_dropped_and_programs_stay_runnable() {
+        let d = temp("targz");
+        let tgz = d.join("a.tar.gz");
+        let mut b = tar::Builder::new(flate2::write::GzEncoder::new(fs::File::create(&tgz).unwrap(), flate2::Compression::fast()));
+        for (name, body, mode) in [("pkg-1.0/bin/prog", "#!/bin/sh\n", 0o755), ("pkg-1.0/README", "hi", 0o644)] {
+            let mut h = tar::Header::new_gnu();
+            h.set_size(body.len() as u64);
+            h.set_mode(mode);
+            h.set_cksum();
+            b.append_data(&mut h, name, body.as_bytes()).unwrap();
+        }
+        b.into_inner().unwrap().finish().unwrap();
+        unpack_to(&tgz, &d.join("out"), "*").unwrap();
+        assert_eq!(fs::read_to_string(d.join("out/README")).unwrap(), "hi");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(fs::metadata(d.join("out/bin/prog")).unwrap().permissions().mode() & 0o111, 0o111, "the run permission survives");
+        }
+        assert!(unpack_to(&tgz, &d.join("out2"), "pkg-1.0/").is_ok() && d.join("out2/bin/prog").exists(), "a named prefix works too");
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn a_variant_replaces_the_download_and_a_missing_one_hides_the_component() {
+        let json = r#"{"schema":1,"components":[
+            {"id":"a","name":"A","version":"1","url":"u0","sha256":"h0","strip_prefix":"","extract_to":"a","binary":"a/x","variants":{"linux-x86_64":{"url":"u1","sha256":"h1","strip_prefix":"top/"}}},
+            {"id":"b","name":"B","version":"1","url":"u","sha256":"h","strip_prefix":"","extract_to":"b","binary":"b/x"}]}"#;
+        let linux = manifest_for(json, "linux-x86_64");
+        let a = linux.components.iter().find(|c| c.id == "a").unwrap();
+        assert_eq!((a.url.as_str(), a.sha256.as_str(), a.strip_prefix.as_str()), ("u1", "h1", "top/"));
+        let mac = manifest_for(json, "macos-aarch64");
+        assert_eq!(mac.components.iter().map(|c| c.id.as_str()).collect::<Vec<_>>(), ["b"], "no macOS build of A: it is not offered");
     }
 }

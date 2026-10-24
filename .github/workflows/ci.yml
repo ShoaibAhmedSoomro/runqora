@@ -24,3 +24,6 @@ jobs:
       - name: Compile everything
         working-directory: app/src-tauri
         run: cargo check --all-targets
+      - name: Tests
+        working-directory: app/src-tauri
+        run: cargo test --lib -- --test-threads=1

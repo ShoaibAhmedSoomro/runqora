@@ -2,98 +2,6 @@
   "schema": 1,
   "components": [
     {
-      "id": "apache",
-      "name": "Apache HTTP Server",
-      "version": "2.4.66",
-      "url": "https://www.apachelounge.com/download/VS17/binaries/httpd-2.4.66-251206-Win64-VS17.zip",
-      "sha256": "2cd1f349b6705e43e784e876a233eeb1a859fa6b8abc693a91f87b35a368f7f9",
-      "strip_prefix": "Apache24/",
-      "extract_to": "apache",
-      "binary": "apache/bin/httpd.exe",
-      "args": [
-        "-d",
-        "{root}/apache"
-      ],
-      "pidfile": "apache/logs/httpd.pid",
-      "shutdown_event": "ap{pid}_shutdown",
-      "port": 80,
-      "admin_url": "http://localhost:{port}/",
-      "configs": [
-        "apache/conf/httpd.conf",
-        "apache/conf/extra/runqora.conf"
-      ],
-      "logs": [
-        "apache/logs/error_log",
-        "apache/logs/access_log"
-      ],
-      "service": {
-        "name": "RunqoraApache",
-        "install": [
-          "-d",
-          "{root}/apache",
-          "-k",
-          "install",
-          "-n",
-          "{service}"
-        ],
-        "remove": [
-          "-k",
-          "uninstall",
-          "-n",
-          "{service}"
-        ]
-      }
-    },
-    {
-      "id": "php",
-      "name": "PHP (thread safe)",
-      "version": "8.3.36",
-      "url": "https://windows.php.net/downloads/releases/php-8.3.36-Win32-vs16-x64.zip",
-      "sha256": "0606810ff8fc232406aaab677b760e06af93a63a366d33ff738d4ce90501dfa5",
-      "strip_prefix": "",
-      "extract_to": "php",
-      "binary": "php/php.exe",
-      "configs": [
-        "php/php.ini"
-      ]
-    },
-    {
-      "id": "mariadb",
-      "name": "MariaDB",
-      "version": "10.11.19",
-      "url": "https://archive.mariadb.org/mariadb-10.11.19/winx64-packages/mariadb-10.11.19-winx64.zip",
-      "sha256": "398ea30e5036010bbebe01d2b1804280424dcc2626e36d8e95155c04d25a0490",
-      "strip_prefix": "mariadb-10.11.19-winx64/",
-      "extract_to": "mariadb",
-      "binary": "mariadb/bin/mysqld.exe",
-      "args": [
-        "--defaults-file={root}/mariadb/my.ini",
-        "--standalone"
-      ],
-      "pidfile": "mariadb/data/mysql.pid",
-      "shutdown_event": "MySQLShutdown{pid}",
-      "port": 3306,
-      "admin_url": "http://localhost:{apache_port}/phpmyadmin/",
-      "configs": [
-        "mariadb/my.ini"
-      ],
-      "logs": [
-        "mariadb/data/mysql_error.log"
-      ],
-      "service": {
-        "name": "RunqoraMariaDB",
-        "install": [
-          "--install",
-          "{service}",
-          "--defaults-file={root}/mariadb/my.ini"
-        ],
-        "remove": [
-          "--remove",
-          "{service}"
-        ]
-      }
-    },
-    {
       "id": "phpmyadmin",
       "name": "phpMyAdmin",
       "version": "5.2.3",
@@ -111,22 +19,38 @@
       "id": "jre",
       "name": "Java runtime (Temurin 21)",
       "version": "21.0.12.1",
-      "url": "https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.12.1%2B1/OpenJDK21U-jre_x64_windows_hotspot_21.0.12.1_1.zip",
-      "sha256": "d35f31e712f0fcf6ac5a093edc90204fbff22f720ba3950bd09d331d5e621636",
       "strip_prefix": "*",
       "extract_to": "jre",
-      "binary": "jre/bin/java.exe"
+      "binary": "jre/bin/java",
+      "variants": {
+        "linux-x86_64": {
+          "url": "https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.12.1%2B1/OpenJDK21U-jre_x64_linux_hotspot_21.0.12.1_1.tar.gz",
+          "sha256": "2413149700df0f7d440500a84a8f764c535f21e5a5e87d38328b64eec2c5b500",
+          "strip_prefix": "*"
+        },
+        "linux-aarch64": {
+          "url": "https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.12.1%2B1/OpenJDK21U-jre_aarch64_linux_hotspot_21.0.12.1_1.tar.gz",
+          "sha256": "14be1f35ebdbd1f6e8d57eb911a3ffb74d6d9aa255abc5daf2b1302002cf2cf2",
+          "strip_prefix": "*"
+        },
+        "macos-aarch64": {
+          "url": "https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.12.1%2B1/OpenJDK21U-jre_aarch64_mac_hotspot_21.0.12.1_1.tar.gz",
+          "sha256": "dec50fc6f9fcd4fe3ae8cabf5a5fa68f6afc48841f7698e468e9aa5d54beed84",
+          "strip_prefix": "jdk-21.0.12.1+1-jre/Contents/Home/"
+        }
+      },
+      "url": "",
+      "sha256": ""
     },
     {
       "id": "tomcat",
       "name": "Apache Tomcat",
       "version": "10.1.61",
-      "url": "https://archive.apache.org/dist/tomcat/tomcat-10/v10.1.61/bin/apache-tomcat-10.1.61-windows-x64.zip",
-      "sha512": "33831f4200eda8638bbf9794a99c4666a144e3b66c87933e57ef53ab7cf23e75bc0e71ae2ddd338c838c674b94d8e673179e5015a0c5500f90f2e992820b52f5",
+      "url": "https://archive.apache.org/dist/tomcat/tomcat-10/v10.1.61/bin/apache-tomcat-10.1.61.tar.gz",
       "strip_prefix": "apache-tomcat-10.1.61/",
       "extract_to": "tomcat",
       "binary": "tomcat/bin/bootstrap.jar",
-      "exe": "jre/bin/java.exe",
+      "exe": "jre/bin/java",
       "needs": [
         "jre"
       ],
@@ -143,7 +67,7 @@
         "--add-opens=java.base/java.util.concurrent=ALL-UNNAMED",
         "--add-opens=java.rmi/sun.rmi.transport=ALL-UNNAMED",
         "-classpath",
-        "{root}/tomcat/bin/bootstrap.jar;{root}/tomcat/bin/tomcat-juli.jar",
+        "{root}/tomcat/bin/bootstrap.jar:{root}/tomcat/bin/tomcat-juli.jar",
         "org.apache.catalina.startup.Bootstrap",
         "start"
       ],
@@ -156,17 +80,19 @@
       "configs": [
         "tomcat/conf/server.xml",
         "tomcat/conf/tomcat-users.xml"
-      ]
+      ],
+      "sha512": "35120a2b1182bac3d55438fbec0dc581d03b0f1c16ce692a930f3bb6a1097cf896b94b389152257071a87cb2928ac8c15f1bad08387c14acc7c17dbc1bb598fb",
+      "sha256": ""
     },
     {
       "id": "mailpit",
       "name": "Mailpit (mail catcher)",
       "version": "1.31.6",
-      "url": "https://github.com/axllent/mailpit/releases/download/v1.31.6/mailpit-windows-amd64.zip",
-      "sha256": "5d5ad094bfb3bac9004f9d1105d2335fea9f8952c09951df73ae0a280e34d3b1",
+      "url": "",
+      "sha256": "",
       "strip_prefix": "",
       "extract_to": "mailpit",
-      "binary": "mailpit/mailpit.exe",
+      "binary": "mailpit/mailpit",
       "args": [
         "--listen",
         "127.0.0.1:{port}",
@@ -178,17 +104,34 @@
       "write_pid": true,
       "pidfile": "mailpit/mailpit.pid",
       "port": 8025,
-      "admin_url": "http://localhost:{port}/"
+      "admin_url": "http://localhost:{port}/",
+      "variants": {
+        "linux-x86_64": {
+          "url": "https://github.com/axllent/mailpit/releases/download/v1.31.6/mailpit-linux-amd64.tar.gz",
+          "sha256": "10fa12ccc610f653d4ed4df848c1817f9935dcf4e9a6a458a19ab0fa02093f91",
+          "strip_prefix": ""
+        },
+        "linux-aarch64": {
+          "url": "https://github.com/axllent/mailpit/releases/download/v1.31.6/mailpit-linux-arm64.tar.gz",
+          "sha256": "de07955b783236d9129da76da9a5970f1777834a18b2c07611de957be784dafe",
+          "strip_prefix": ""
+        },
+        "macos-aarch64": {
+          "url": "https://github.com/axllent/mailpit/releases/download/v1.31.6/mailpit-darwin-arm64.tar.gz",
+          "sha256": "1411270aa8fd7f4fb0cc358318754d7bb7c2c30bfd70572dd12d05a53e956373",
+          "strip_prefix": ""
+        }
+      }
     },
     {
       "id": "sftpgo",
       "name": "SFTPGo (FTP and SFTP)",
       "version": "2.7.6",
-      "url": "https://github.com/drakkan/sftpgo/releases/download/v2.7.6/sftpgo_v2.7.6_windows_portable.zip",
-      "sha256": "af3994bb690962c7575858aee368a4c1d6fd4748b35770bb0773eb06408d504d",
+      "url": "",
+      "sha256": "",
       "strip_prefix": "*",
       "extract_to": "sftpgo",
-      "binary": "sftpgo/sftpgo.exe",
+      "binary": "sftpgo/sftpgo",
       "args": [
         "serve",
         "--config-dir",
@@ -197,7 +140,7 @@
       "env": {
         "SFTPGO_HTTPD__BINDINGS__0__PORT": "{port}",
         "SFTPGO_HTTPD__BINDINGS__0__ADDRESS": "127.0.0.1",
-        "SFTPGO_FTPD__BINDINGS__0__PORT": "21",
+        "SFTPGO_FTPD__BINDINGS__0__PORT": "2121",
         "SFTPGO_FTPD__BINDINGS__0__ADDRESS": "127.0.0.1",
         "SFTPGO_SFTPD__BINDINGS__0__PORT": "2022",
         "SFTPGO_SFTPD__BINDINGS__0__ADDRESS": "127.0.0.1"
@@ -205,7 +148,24 @@
       "write_pid": true,
       "pidfile": "sftpgo/sftpgo.pid",
       "port": 8082,
-      "admin_url": "http://localhost:{port}/web/admin"
+      "admin_url": "http://localhost:{port}/web/admin",
+      "variants": {
+        "linux-x86_64": {
+          "url": "https://github.com/drakkan/sftpgo/releases/download/v2.7.6/sftpgo_v2.7.6_linux_x86_64.tar.xz",
+          "sha256": "71f5c9ae3284fc20bb606b2cf396db49645f9bdf4dba770cd76d6fd4720d5cb4",
+          "strip_prefix": "*"
+        },
+        "linux-aarch64": {
+          "url": "https://github.com/drakkan/sftpgo/releases/download/v2.7.6/sftpgo_v2.7.6_linux_arm64.tar.xz",
+          "sha256": "0d5c54a266515ae86a6a534e76c94807453353a1913ba3a26e81b9c20e548937",
+          "strip_prefix": "*"
+        },
+        "macos-aarch64": {
+          "url": "https://github.com/drakkan/sftpgo/releases/download/v2.7.6/sftpgo_v2.7.6_macOS_arm64.tar.xz",
+          "sha256": "a6417b61789ec5dfb74269a3c9cb94c1c4ce9f2b95831467221e9c75c6fa82f7",
+          "strip_prefix": "*"
+        }
+      }
     },
     {
       "id": "wordpress",
@@ -221,11 +181,28 @@
       "id": "node",
       "name": "Node.js (LTS)",
       "version": "24.22.1",
-      "url": "https://nodejs.org/dist/v24.22.1/node-v24.22.1-win-x64.zip",
-      "sha256": "d2046d28c2c3dcd211ac5145c0bf30e2047ef9dfb306693c8c6e2eccd8b95fa5",
+      "url": "",
+      "sha256": "",
       "strip_prefix": "*",
       "extract_to": "node",
-      "binary": "node/node.exe"
+      "binary": "node/bin/node",
+      "variants": {
+        "linux-x86_64": {
+          "url": "https://nodejs.org/dist/v24.22.1/node-v24.22.1-linux-x64.tar.gz",
+          "sha256": "eb6728e77c576a35162c122c45ccadf224d89ff00abc8dae46cc2897c6002d7c",
+          "strip_prefix": "*"
+        },
+        "linux-aarch64": {
+          "url": "https://nodejs.org/dist/v24.22.1/node-v24.22.1-linux-arm64.tar.gz",
+          "sha256": "33c37be234ba8bee041961047b19160f4d7d0f164e8e246f78bdd10feff148b3",
+          "strip_prefix": "*"
+        },
+        "macos-aarch64": {
+          "url": "https://nodejs.org/dist/v24.22.1/node-v24.22.1-darwin-arm64.tar.gz",
+          "sha256": "89c682593d76cd44233fa53b1563264e7de9cbb189cad169135c5b4fadfbc0a7",
+          "strip_prefix": "*"
+        }
+      }
     },
     {
       "id": "composer",

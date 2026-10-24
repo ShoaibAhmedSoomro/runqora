@@ -52,4 +52,4 @@ jobs:
           (cd dist && python3 -m http.server 8765 --bind 127.0.0.1 >/dev/null 2>&1 &)
           python3 scripts/gen-unix-manifest.py --stack dist/stack.json --url-base http://127.0.0.1:8765 --out "$RUNNER_TEMP/manifest.json"
           chmod +x e2e/unix.sh
-          e2e/unix.sh "$PWD/app/src-tauri/target/debug/rq" "$RUNNER_TEMP/manifest.json"
+          e2e/unix.sh "$PWD/app/src-tauri/target/debug/rq" "$RUNNER_TEMP/manifest.json" apache php mariadb phpmyadmin composer node adminer mailpit jre tomcat sftpgo wordpress

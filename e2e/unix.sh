@@ -58,5 +58,49 @@ echo "HTTPS"
 check "an HTTPS certificate can be made" bash -c "'$RQ' https regenerate | grep -qi 'certificate\|authority\|expires'"
 check "doctor finds nothing broken" bash -c "'$RQ' doctor | grep -vi 'problem' >/dev/null"
 
+has() { case " $MODULES " in *" $1 "*) return 0;; esac; return 1; }
+export RUNQORA_PORT_MAILPIT=18025 RUNQORA_PORT_TOMCAT=18081 RUNQORA_PORT_SFTPGO=18082
+
+echo "settings and sites"
+check "a PHP setting is written to php.ini" bash -c "'$RQ' config set php memory_limit 384M && grep -q '^memory_limit *= *384M' '$RUNQORA_DIR/php/php.ini'"
+check "a bad PHP setting is refused" bash -c "! '$RQ' config set php memory_limit lots"
+check "the Apache port can be read back" bash -c "'$RQ' config get apache | grep -qi 18080"
+check "a site can be added" "$RQ" sites add demo
+check "the site is in the Apache config" grep -q "demo.localhost" "$RUNQORA_DIR/apache/conf/extra/runqora.conf"
+"$RQ" start >/dev/null 2>&1
+check "the new setting reaches PHP" bash -c "echo '<?php echo ini_get(\"memory_limit\");' > '$RUNQORA_DIR/htdocs/m.php'; curl -fsS --max-time 30 http://127.0.0.1:18080/m.php | grep -qx 384M"
+check "the site answers on its own name" bash -c "curl -fsS --max-time 30 -H 'Host: demo.localhost' http://127.0.0.1:18080/ | grep -qi 'demo'"
+check "the site can be removed" "$RQ" sites remove demo
+"$RQ" stop >/dev/null 2>&1
+
+if has node; then echo "node"; check "node runs" "$RUNQORA_DIR/node/bin/node" -v; fi
+if has composer; then echo "composer"; check "composer runs on Runqora's PHP" "$RUNQORA_DIR/composer/composer" --version; fi
+if has adminer; then check "adminer is in place" test -f "$RUNQORA_DIR/adminer/adminer.php"; fi
+if has mailpit; then
+  echo "mailpit"
+  check "mailpit starts" "$RQ" start mailpit
+  check "mailpit answers" bash -c "curl -fsS --max-time 30 http://127.0.0.1:18025/ | grep -qi mailpit"
+  check "mailpit stops" "$RQ" stop mailpit
+fi
+if has tomcat; then
+  echo "tomcat"
+  check "tomcat starts (it brought its Java)" "$RQ" start tomcat
+  check "tomcat answers" bash -c "curl -s --max-time 30 -o /dev/null -w '%{http_code}' http://127.0.0.1:18081/ | grep -qE '200|404'"
+  check "tomcat stops by its shutdown word" "$RQ" stop tomcat
+fi
+if has sftpgo; then
+  echo "sftpgo"
+  check "sftpgo starts" "$RQ" start sftpgo
+  check "sftpgo answers" bash -c "curl -s --max-time 30 -o /dev/null -w '%{http_code}' http://127.0.0.1:18082/web/admin | grep -qE '200|30[0-9]'"
+  check "sftpgo stops" "$RQ" stop sftpgo
+fi
+if has wordpress; then
+  echo "wordpress"
+  "$RQ" start mariadb >/dev/null 2>&1
+  check "a WordPress site can be made" "$RQ" wordpress blog
+  check "its files exist" test -f "$RUNQORA_DIR/sites/blog/wp-config.php"
+  "$RQ" stop >/dev/null 2>&1
+fi
+
 echo; echo "passed $pass, failed $fail"
 exit "$fail"

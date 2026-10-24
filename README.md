@@ -5,11 +5,15 @@
 <h1 align="center">Runqora</h1>
 
 <p align="center">
-  A local web stack for Windows: Apache, PHP, MariaDB and more, installed, run and updated from one clean window.
+  A local web stack for Windows, macOS and Linux: Apache, PHP, MariaDB and more, installed, run and updated from one clean window.
 </p>
 
 <p align="center">
-  <a href="https://github.com/ShoaibAhmedSoomro/runqora/releases/latest/download/Runqora-Setup-x64.exe"><b>Download for Windows</b></a>
+  <a href="https://github.com/ShoaibAhmedSoomro/runqora/releases/latest/download/Runqora-Setup-x64.exe"><b>Windows</b></a>
+  &nbsp;·&nbsp;
+  <a href="https://github.com/ShoaibAhmedSoomro/runqora/releases/latest/download/Runqora-macos-aarch64.dmg"><b>macOS</b></a>
+  &nbsp;·&nbsp;
+  <a href="https://github.com/ShoaibAhmedSoomro/runqora/releases/latest/download/Runqora-linux-x86_64.AppImage"><b>Linux</b></a>
   &nbsp;·&nbsp;
   <a href="https://shoaibahmedsoomro.github.io/runqora/">Website</a>
 </p>
@@ -17,6 +21,23 @@
 <p align="center">
   <img src="docs/img/modules-dark.png" alt="Runqora modules page" width="860">
 </p>
+
+## Platforms
+
+| | Download | Needs |
+|---|---|---|
+| **Windows** | `Runqora-Setup-x64.exe` | Windows 10 or 11, 64-bit. Installs for your account, no administrator rights. SmartScreen may warn: the installer is not code-signed. |
+| **macOS** | `Runqora-macos-aarch64.dmg` | Apple silicon (M1 or newer), macOS 11 or later. Drag Runqora to Applications. The app is not notarized, so the first time use right-click, then Open (or run `xattr -dr com.apple.quarantine /Applications/Runqora.app`). |
+| **Linux** | `Runqora-linux-x86_64.AppImage` or `.deb` (and `linux-aarch64` for ARM) | A 64-bit desktop from 2022 or later (Ubuntu 22.04, Debian 12, Fedora 37 or similar). AppImage: `chmod +x` it and run it (needs `libfuse2`). Debian and Ubuntu: `sudo apt install ./Runqora-linux-x86_64.deb`. On GNOME the tray icon needs the AppIndicator extension. |
+
+The same window, the same `rq` command line and the same modules everywhere. What differs by system:
+
+- Apache listens on **8000** on Linux and macOS (ports below 1024 need administrator rights there); everything else keeps its usual port, and every port can be changed in Settings.
+- PHP runs as **PHP-FPM** behind Apache with its extensions built in, so the extension switches of the Windows version do not exist there.
+- Your install lives in `~/Runqora` instead of `C:\Runqora`. "Start with Windows" becomes "Start at sign-in" (an autostart entry on Linux, a LaunchAgent on macOS).
+- Windows services, FileZilla Server and Mercury Mail are Windows-only.
+- Local HTTPS: macOS asks for your password to trust the certificate; on Linux the certificate is added to the NSS store that Chrome, Chromium and Edge read (Firefox has its own list).
+- Apache, PHP and MariaDB for Linux and macOS are built by this project (see `.github/workflows/stack.yml`) because their publishers offer no portable download; everything else comes from the publishers themselves, checked against their checksums.
 
 ## Features
 

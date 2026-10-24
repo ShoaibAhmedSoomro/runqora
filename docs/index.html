@@ -3,11 +3,11 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Runqora - local web stack for Windows</title>
-<meta name="description" content="Install and run Apache, PHP, MariaDB, phpMyAdmin and more on Windows from one clean window. Sites, HTTPS, updates and a command line.">
+<title>Runqora - local web stack for Windows, macOS and Linux</title>
+<meta name="description" content="Install and run Apache, PHP, MariaDB, phpMyAdmin and more on Windows, macOS and Linux from one clean window. Sites, HTTPS, updates and a command line.">
 <link rel="icon" href="img/logo.svg" type="image/svg+xml">
 <meta property="og:title" content="Runqora">
-<meta property="og:description" content="A local web stack for Windows: Apache, PHP, MariaDB and more in one clean window.">
+<meta property="og:description" content="A local web stack for Windows, macOS and Linux: Apache, PHP, MariaDB and more in one clean window.">
 <meta property="og:image" content="https://shoaibahmedsoomro.github.io/runqora/img/modules-dark.png">
 <style>
 :root {
@@ -95,15 +95,16 @@ footer a:hover { color: var(--text); text-decoration: underline; }
     <div class="hero">
       <img class="mark" src="img/logo.svg" alt="Runqora logo">
       <h1>Your local web stack, in one window.</h1>
-      <p class="lead">Install and run Apache, PHP, MariaDB, phpMyAdmin and more on Windows. Sites at <code>name.localhost</code>, local HTTPS, one-click WordPress and safe updates.</p>
+      <p class="lead">Install and run Apache, PHP, MariaDB, phpMyAdmin and more on Windows, macOS and Linux. Sites at <code>name.localhost</code>, local HTTPS, one-click WordPress and safe updates.</p>
       <div class="cta">
         <a class="btn primary" id="dl" href="https://github.com/ShoaibAhmedSoomro/runqora/releases/latest/download/Runqora-Setup-x64.exe">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m0 0l-5-5m5 5l5-5M4 20h16"/></svg>
-          Download for Windows
+          <span id="dl-label">Download for Windows</span>
         </a>
         <a class="btn" href="https://github.com/ShoaibAhmedSoomro/runqora/releases">All releases</a>
       </div>
-      <p class="fine">Windows 10 or 11, 64-bit · installs for your account only, no administrator rights · <span id="ver">free and open source</span></p>
+      <p class="fine" id="others">Also for <a href="https://github.com/ShoaibAhmedSoomro/runqora/releases/latest/download/Runqora-Setup-x64.exe">Windows</a> · <a href="https://github.com/ShoaibAhmedSoomro/runqora/releases/latest/download/Runqora-macos-aarch64.dmg">macOS (Apple silicon)</a> · Linux: <a href="https://github.com/ShoaibAhmedSoomro/runqora/releases/latest/download/Runqora-linux-x86_64.AppImage">AppImage</a>, <a href="https://github.com/ShoaibAhmedSoomro/runqora/releases/latest/download/Runqora-linux-x86_64.deb">.deb</a> (<a href="https://github.com/ShoaibAhmedSoomro/runqora/releases/latest/download/Runqora-linux-aarch64.AppImage">ARM</a>)</p>
+      <p class="fine">Installs for your account only, no administrator rights · <span id="ver">free and open source</span></p>
       <div class="shot"><img src="img/modules-dark.png" alt="The Runqora modules page showing Apache, PHP, MariaDB and phpMyAdmin"></div>
     </div>
 
@@ -114,12 +115,12 @@ footer a:hover { color: var(--text); text-decoration: underline; }
         <div class="card" style="--c:#2f80ff"><h3><i></i>One-click stack</h3><p>Apache, PHP, MariaDB and phpMyAdmin download from their publishers and are checked against the published checksum before anything is unpacked.</p></div>
         <div class="card" style="--c:#7c5cff"><h3><i></i>Sites without hosts files</h3><p>Point any folder at <code>shop.localhost</code>. Runqora writes the virtual host and the certificate name for you.</p></div>
         <div class="card" style="--c:#d26bff"><h3><i></i>One-click WordPress</h3><p>Copies WordPress, creates its database and writes <code>wp-config.php</code>. You finish in the browser.</p></div>
-        <div class="card" style="--c:#ff4f7b"><h3><i></i>Local HTTPS</h3><p>A private certificate authority for your own sites. Trusting it is a button you press, with Windows asking first.</p></div>
+        <div class="card" style="--c:#ff4f7b"><h3><i></i>Local HTTPS</h3><p>A private certificate authority for your own sites. Trusting it is a button you press, with your system asking first.</p></div>
         <div class="card" style="--c:#ff9a3c"><h3><i></i>Settings, not config files</h3><p>PHP limits and extensions, MariaDB tuning, ports and folders as forms. Export and import everything as a <code>runqora.ini</code>.</p></div>
         <div class="card" style="--c:#ffb13c"><h3><i></i>Port conflicts fixed</h3><p>See which program holds a port, then end it, stop its service or move to a free port in one click.</p></div>
         <div class="card" style="--c:#2fd0e8"><h3><i></i>Updates for everything</h3><p>Every module is checked against its publisher, and Runqora updates itself from new releases here. Minor and major upgrades show warnings first and roll back.</p></div>
         <div class="card" style="--c:#00c389"><h3><i></i>More servers</h3><p>Tomcat with Java, Mailpit, SFTPGo, Node.js, Composer and Adminer, plus control of FileZilla Server or Mercury if you already have them.</p></div>
-        <div class="card" style="--c:#5b9bff"><h3><i></i>Windows 11 design</h3><p>Mica, light and dark themes that follow Windows, your accent colour, a tray icon and a layout that fits any window size.</p></div>
+        <div class="card" style="--c:#5b9bff"><h3><i></i>A native feel</h3><p>Mica on Windows 11, light and dark themes that follow your system, your accent colour, a tray icon and a layout that fits any window size.</p></div>
         <div class="card" style="--c:#8a4dff"><h3><i></i>A real command line</h3><p><code>rq start</code>, <code>rq sites add</code>, <code>rq doctor --fix</code>: everything the window does, scriptable.</p></div>
       </div>
       <div class="pair">
@@ -132,16 +133,16 @@ footer a:hover { color: var(--text); text-decoration: underline; }
       <h2>Install in a minute</h2>
       <p class="sub">The installer puts Runqora in your user profile. Your servers and databases live in their own folder and stay put if you uninstall.</p>
       <ol class="steps">
-        <li><b>Download the installer</b><span><code>Runqora-Setup-x64.exe</code> from the button above.</span></li>
-        <li><b>Run it</b><span>Windows may show a SmartScreen notice because the installer is not code-signed yet: choose <i>More info</i>, then <i>Run anyway</i>.</span></li>
-        <li><b>Open Runqora and press Install</b><span>on Apache, PHP, MariaDB and phpMyAdmin, then Start all.</span></li>
+        <li><b>Download it for your system</b><span>The button above picks yours. Windows: <code>Runqora-Setup-x64.exe</code>. macOS: <code>Runqora-macos-aarch64.dmg</code>. Linux: an <code>.AppImage</code> or a <code>.deb</code>.</span></li>
+        <li><b>Open it</b><span><i>Windows</i> may show a SmartScreen notice because the installer is not code-signed yet: choose <i>More info</i>, then <i>Run anyway</i>. <i>macOS</i>: drag Runqora to Applications; it is not notarized, so the first time right-click it and choose <i>Open</i>. <i>Linux</i>: <code>sudo apt install ./Runqora-linux-x86_64.deb</code>, or make the AppImage executable and run it.</span></li>
+        <li><b>Open Runqora and press Install</b><span>on Apache, PHP, MariaDB and phpMyAdmin, then Start all. On Linux and macOS Apache listens on port 8000 and PHP runs as PHP-FPM.</span></li>
       </ol>
     </section>
 
     <div class="cta-band">
       <h2>Ready when you are</h2>
-      <p class="sub" style="margin-inline:auto">Free, open source and made for developers on Windows.</p>
-      <a class="btn primary" href="https://github.com/ShoaibAhmedSoomro/runqora/releases/latest/download/Runqora-Setup-x64.exe">Download for Windows</a>
+      <p class="sub" style="margin-inline:auto">Free, open source and made for developers on Windows, macOS and Linux.</p>
+      <a class="btn primary" id="dl2" href="https://github.com/ShoaibAhmedSoomro/runqora/releases/latest/download/Runqora-Setup-x64.exe">Download for Windows</a>
     </div>
   </main>
 
@@ -156,6 +157,19 @@ footer a:hover { color: var(--text); text-decoration: underline; }
   </footer>
 </div>
 <script>
+// the main button follows the visitor's system; every other download is linked under it
+(function () {
+  var ua = navigator.userAgent, p = (navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || "";
+  var base = "https://github.com/ShoaibAhmedSoomro/runqora/releases/latest/download/", pick = null;
+  if (/Mac/i.test(p) || /Mac OS X/.test(ua)) pick = ["macOS", "Runqora-macos-aarch64.dmg"];
+  else if (/Linux/i.test(p) && !/Android/.test(ua)) pick = ["Linux", /aarch64|arm/i.test(ua) ? "Runqora-linux-aarch64.AppImage" : "Runqora-linux-x86_64.AppImage"];
+  if (!pick) return;
+  var a = document.getElementById("dl"), b = document.getElementById("dl2");
+  a.href = base + pick[1];
+  document.getElementById("dl-label").textContent = "Download for " + pick[0];
+  if (b) { b.href = base + pick[1]; b.textContent = "Download for " + pick[0]; }
+})();
+
 // show the newest version number from GitHub; the page works without it
 fetch("https://api.github.com/repos/ShoaibAhmedSoomro/runqora/releases/latest").then((r) => (r.ok ? r.json() : null)).then((d) => {
   if (d && d.tag_name) document.getElementById("ver").textContent = "version " + d.tag_name.replace(/^v/, "");

@@ -1,0 +1,89 @@
+name: Stack
+# Builds the programs that have no portable download for Linux and macOS (Apache, PHP, MariaDB) and publishes them as
+# release "stack-<tag>". Run by hand when a version changes: Actions > Stack > Run workflow.
+on:
+  push:
+    branches: [crossplatform]
+    paths: ["scripts/stack/**", ".github/workflows/stack.yml"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Stack number (the release becomes stack-<number>)"
+        required: true
+        default: "1"
+      only:
+        description: "Build only this program (apache, php or mariadb); empty builds all"
+        required: false
+        default: ""
+permissions:
+  contents: write
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - { plat: linux-x86_64, runner: ubuntu-22.04, sp: linux-x86_64 }
+          - { plat: linux-aarch64, runner: ubuntu-22.04-arm, sp: linux-aarch64 }
+          - { plat: macos-aarch64, runner: macos-14, sp: macos-aarch64 }
+        prog: [apache, php, mariadb]
+    runs-on: ${{ matrix.os.runner }}
+    steps:
+      - name: Skip programs that were not asked for
+        id: want
+        run: echo "go=${{ (inputs.only == '' || inputs.only == matrix.prog) && 'yes' || 'no' }}" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v4
+      - name: On a push, build what scripts/stack/only.txt names (empty: everything)
+        if: github.event_name == 'push'
+        id: want_push
+        run: |
+          only=$(tr -d ' 
+' < scripts/stack/only.txt 2>/dev/null || true)
+          if [ -z "$only" ] || [ "$only" = "${{ matrix.prog }}" ]; then echo "go=yes" >> "$GITHUB_OUTPUT"; else echo "go=no" >> "$GITHUB_OUTPUT"; fi
+      - name: Build tools (Linux)
+        if: (steps.want_push.outputs.go == 'yes' || (github.event_name != 'push' && steps.want.outputs.go == 'yes')) && runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake bison libncurses-dev libexpat1-dev pkg-config perl curl bzip2
+      - name: Build tools (macOS)
+        if: (steps.want_push.outputs.go == 'yes' || (github.event_name != 'push' && steps.want.outputs.go == 'yes')) && runner.os == 'macOS'
+        run: |
+          brew install cmake bison pkg-config
+          echo "$(brew --prefix bison)/bin" >> "$GITHUB_PATH"
+      - name: Build ${{ matrix.prog }}
+        if: (steps.want_push.outputs.go == 'yes' || (github.event_name != 'push' && steps.want.outputs.go == 'yes'))
+        run: |
+          chmod +x scripts/stack/*.sh
+          if [ "${{ matrix.prog }}" = php ]; then scripts/stack/build-php.sh "${{ matrix.os.plat }}" "${{ matrix.os.sp }}"; else scripts/stack/build-${{ matrix.prog }}.sh "${{ matrix.os.plat }}"; fi
+      - uses: actions/upload-artifact@v4
+        if: (steps.want_push.outputs.go == 'yes' || (github.event_name != 'push' && steps.want.outputs.go == 'yes'))
+        with:
+          name: ${{ matrix.prog }}-${{ matrix.os.plat }}
+          path: dist/*.tar.gz
+  publish:
+    needs: build
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Publish release stack-${{ inputs.tag || '1' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd dist
+          python3 - <<'PY'
+          import hashlib, json, glob, os
+          out = {"tag": "${{ inputs.tag || '1' }}"}
+          for f in sorted(glob.glob("*.tar.gz")):
+              prog, rest = f.split("-", 1)               # apache-2.4.66-linux-x86_64.tar.gz
+              plat = rest.rsplit("-", 2)[-2] + "-" + rest.rsplit("-", 1)[-1].removesuffix(".tar.gz")
+              out[f"{prog}-{plat}"] = hashlib.sha256(open(f, "rb").read()).hexdigest()
+          json.dump(out, open("stack.json", "w"), indent=1)
+          print(json.dumps(out, indent=1))
+          PY
+          gh release create "stack-${{ inputs.tag || '1' }}" --repo "$GITHUB_REPOSITORY" --prerelease --title "Stack ${{ inputs.tag || '1' }}" \
+            --notes "Apache, PHP and MariaDB builds for Linux and macOS that Runqora installs. Built by the Stack workflow." *.tar.gz stack.json \
+            || gh release upload "stack-${{ inputs.tag || '1' }}" --repo "$GITHUB_REPOSITORY" --clobber *.tar.gz stack.json

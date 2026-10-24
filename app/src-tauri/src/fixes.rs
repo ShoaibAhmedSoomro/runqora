@@ -347,5 +347,6 @@ pub fn fix_all(root: &Path) -> Vec<Result<String, String>> {
     diagnose(root).into_iter().filter_map(|p| p.fix.map(|f| (f, p.module))).filter(|k| done.insert(k.clone())).map(|(f, m)| apply_fix(root, f, &m)).collect()
 }
 
-#[cfg(test)]
+// the fixtures of these tests are Windows programs and services: Linux and macOS are covered by e2e/unix.sh
+#[cfg(all(test, windows))]
 mod tests;

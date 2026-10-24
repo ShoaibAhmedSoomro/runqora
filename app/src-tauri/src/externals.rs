@@ -172,7 +172,8 @@ pub fn get_url(id: &str) -> Result<&'static str, String> {
     Ok(get(id)?.get_url)
 }
 
-#[cfg(test)]
+// the fixtures of these tests are Windows programs and services: Linux and macOS are covered by e2e/unix.sh
+#[cfg(all(test, windows))]
 mod tests {
     use super::*;
 

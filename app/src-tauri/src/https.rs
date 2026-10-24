@@ -276,5 +276,6 @@ pub fn apache_block(root: &Path, port: u16, doc: &str, sites: &[(String, String)
     s
 }
 
-#[cfg(test)]
+// the fixtures of these tests are Windows programs and services: Linux and macOS are covered by e2e/unix.sh
+#[cfg(all(test, windows))]
 mod tests;

@@ -573,6 +573,9 @@ pub fn post_install(c: &Component, root: &Path) -> Result<(), String> {
                 // the Unix build keeps its setup script in scripts/, the Windows one in bin/
                 let tool = [dir.join("bin"), dir.join("scripts")].into_iter().map(|d| d.join(exe("mariadb-install-db"))).find(|p| p.exists()).unwrap_or_else(|| dir.join("bin").join(exe("mariadb-install-db")));
                 let mut cmd = Command::new(tool);
+                if cfg!(unix) {
+                    cmd.arg("--no-defaults"); // first, and before anything else: a MySQL on this computer may have a /etc/mysql/my.cnf naming another user
+                }
                 cmd.arg(format!("--datadir={r}/data"));
                 if cfg!(unix) {
                     // root without a password over TCP like the Windows build (the default there is the unix socket)

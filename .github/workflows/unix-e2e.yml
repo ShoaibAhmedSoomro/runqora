@@ -28,9 +28,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          run=$(tr -d '[:space:]' < e2e/stack-run.txt)
           mkdir dist
-          for p in apache php mariadb; do gh run download "$run" --repo "$GITHUB_REPOSITORY" -n "$p-${{ matrix.os.plat }}" -D dist; done
+          # e2e/stack-run.txt: one line per program, "<program> <Stack run number>"
+          while read -r p run; do [ -n "$p" ] && gh run download "$run" --repo "$GITHUB_REPOSITORY" -n "$p-${{ matrix.os.plat }}" -D dist; done < e2e/stack-run.txt
           ls -l dist
       - name: Linux libraries
         if: runner.os == 'Linux'

@@ -19,7 +19,7 @@ export CFLAGS="-O2 -fPIC"
 ( cd openssl-$SSL && ./config --prefix="$DEPS" --libdir=lib no-shared no-tests >/dev/null && make -j"$NPROC" >/dev/null && make install_sw >/dev/null )
 ( cd pcre2-$PCRE && ./configure --prefix="$DEPS" --disable-shared --enable-static >/dev/null && make -j"$NPROC" >/dev/null && make install >/dev/null )
 ( cd apr-$APR && ./configure --prefix="$DEPS" --disable-shared >/dev/null && make -j"$NPROC" >/dev/null && make install >/dev/null )
-( cd apr-util-$APU && ./configure --prefix="$DEPS" --with-apr="$DEPS" --disable-shared --with-crypto --with-openssl="$DEPS" --with-expat=/usr >/dev/null 2>&1 || ./configure --prefix="$DEPS" --with-apr="$DEPS" --disable-shared --with-crypto --with-openssl="$DEPS" >/dev/null && make -j"$NPROC" >/dev/null && make install >/dev/null )
+( cd apr-util-$APU && ./configure --prefix="$DEPS" --with-apr="$DEPS" --disable-shared --disable-util-dso --with-crypto --with-openssl="$DEPS" --with-expat=/usr >/dev/null 2>&1 || ./configure --prefix="$DEPS" --with-apr="$DEPS" --disable-shared --disable-util-dso --with-crypto --with-openssl="$DEPS" >/dev/null && make -j"$NPROC" >/dev/null && make install >/dev/null )
 
 # the prefix is a marker: Runqora rewrites it (ServerRoot) when it installs and starts with `httpd -d <folder>`
 PREFIX=/__RUNQORA__/apache

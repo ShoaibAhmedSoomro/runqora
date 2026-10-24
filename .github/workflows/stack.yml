@@ -37,8 +37,7 @@ jobs:
         if: github.event_name == 'push'
         id: want_push
         run: |
-          only=$(tr -d ' 
-' < scripts/stack/only.txt 2>/dev/null || true)
+          only=$(tr -d '[:space:]' < scripts/stack/only.txt 2>/dev/null || true)
           if [ -z "$only" ] || [ "$only" = "${{ matrix.prog }}" ]; then echo "go=yes" >> "$GITHUB_OUTPUT"; else echo "go=no" >> "$GITHUB_OUTPUT"; fi
       - name: Build tools (Linux)
         if: (steps.want_push.outputs.go == 'yes' || (github.event_name != 'push' && steps.want.outputs.go == 'yes')) && runner.os == 'Linux'

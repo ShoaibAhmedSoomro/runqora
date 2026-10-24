@@ -127,7 +127,7 @@ pub fn build(app: &AppHandle, rows: &[Row], login: bool) -> tauri::Result<Menu<W
     items.push(Box::new(MenuItem::with_id(app, "start_all", "Start all", any, None::<&str>)?));
     items.push(Box::new(MenuItem::with_id(app, "stop_all", "Stop all", any, None::<&str>)?));
     items.push(Box::new(PredefinedMenuItem::separator(app)?));
-    items.push(Box::new(CheckMenuItem::with_id(app, "login", "Start with Windows", true, login, None::<&str>)?));
+    items.push(Box::new(CheckMenuItem::with_id(app, "login", if cfg!(windows) { "Start with Windows" } else { "Start at sign-in" }, true, login, None::<&str>)?));
     items.push(Box::new(MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?));
     let refs: Vec<&dyn IsMenuItem<Wry>> = items.iter().map(|b| b.as_ref()).collect();
     Menu::with_items(app, &refs)
@@ -199,7 +199,7 @@ pub fn on_menu(app: &AppHandle, id: &str) -> bool {
             }
             "folder" => match rt::module_folder(&who) {
                 Ok(dir) => {
-                    let _ = std::process::Command::new("explorer.exe").arg(dir).spawn();
+                    let _ = rt::open_folder(dir);
                 }
                 Err(e) => note(false, e),
             },
@@ -210,8 +210,7 @@ pub fn on_menu(app: &AppHandle, id: &str) -> bool {
 }
 
 fn open_url(url: &str) {
-    use std::os::windows::process::CommandExt;
-    let _ = std::process::Command::new("cmd").args(["/C", "start", "", url]).creation_flags(0x0800_0000).spawn();
+    let _ = rt::open_url(url);
 }
 
 /// Rebuild the menu and tooltip whenever a server starts, stops or appears. Polls the same state the window shows.

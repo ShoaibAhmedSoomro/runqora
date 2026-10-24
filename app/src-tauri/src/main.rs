@@ -7,10 +7,9 @@ mod tray;
 
 use runqora as rt;
 use serde::Serialize;
-use std::{fs, os::windows::process::CommandExt, process::Command};
+use std::fs;
 use tauri::Manager;
 
-const NO_WINDOW: u32 = 0x0800_0000;
 
 /// Run blocking core work off the UI thread.
 async fn blocking<T: Send + 'static>(f: impl FnOnce() -> Result<T, String> + Send + 'static) -> Result<T, String> {
@@ -46,7 +45,7 @@ async fn component_install(id: String) -> Result<String, String> {
 #[tauri::command]
 async fn module_launch(id: String) -> Result<String, String> {
     blocking(move || {
-        rt::launch(&id, &|url: &str| Command::new("cmd").args(["/C", "start", "", url]).creation_flags(NO_WINDOW).spawn().map(|_| ()).map_err(|e| e.to_string()))
+        rt::launch(&id, &|url: &str| rt::open_url(url))
     })
     .await
 }
@@ -55,14 +54,14 @@ async fn module_launch(id: String) -> Result<String, String> {
 #[tauri::command]
 fn open_module_folder(id: String) -> Result<(), String> {
     let dir = rt::module_folder(&id)?;
-    Command::new("explorer.exe").arg(dir).spawn().map(|_| ()).map_err(|e| e.to_string())
+    rt::open_folder(dir)
 }
 
 #[tauri::command]
 fn module_admin(id: String) -> Result<(), String> {
     // the url is built in the core from the manifest and ports, never from UI input
     let url = rt::admin_url(&rt::component(&id)?).ok_or("this module has no admin page")?;
-    Command::new("cmd").args(["/C", "start", "", &url]).creation_flags(NO_WINDOW).spawn().map(|_| ()).map_err(|e| e.to_string())
+    rt::open_url(&url)
 }
 
 #[tauri::command]
@@ -155,7 +154,7 @@ fn open_url(url: String) -> Result<(), String> {
     if !rt::is_local_url(&url, &rt::root()) {
         return Err("Runqora only opens addresses on this PC".into());
     }
-    Command::new("cmd").args(["/C", "start", "", &url]).creation_flags(NO_WINDOW).spawn().map(|_| ()).map_err(|e| e.to_string())
+    rt::open_url(&url)
 }
 
 #[tauri::command]
@@ -206,7 +205,7 @@ async fn site_remove(name: String) -> Result<String, String> {
 #[tauri::command]
 fn site_open_folder(name: String) -> Result<(), String> {
     let site = rt::sites::list(&rt::root()).into_iter().find(|s| s.name == name).ok_or("no such site")?;
-    Command::new("explorer.exe").arg(site.folder).spawn().map(|_| ()).map_err(|e| e.to_string())
+    rt::open_folder(site.folder)
 }
 
 #[tauri::command]
@@ -238,7 +237,7 @@ fn external_open(id: String) -> Result<(), String> {
 #[tauri::command]
 fn external_get(id: String) -> Result<(), String> {
     let url = rt::externals::get_url(&id)?;
-    Command::new("cmd").args(["/C", "start", "", url]).creation_flags(NO_WINDOW).spawn().map(|_| ()).map_err(|e| e.to_string())
+    rt::open_url(url)
 }
 
 /// The developer's own pages. The UI sends only a key; the address comes from this list.
@@ -258,7 +257,7 @@ fn developer_links() -> Vec<(&'static str, &'static str)> {
 #[tauri::command]
 fn open_developer(id: String) -> Result<(), String> {
     let url = DEVELOPER.iter().find(|(k, _)| *k == id).map(|(_, u)| *u).ok_or("unknown link")?;
-    Command::new("cmd").args(["/C", "start", "", url]).creation_flags(NO_WINDOW).spawn().map(|_| ()).map_err(|e| e.to_string())
+    rt::open_url(url)
 }
 
 /// What every running download or update is doing right now (stage and bytes), for the progress bars.
@@ -397,7 +396,7 @@ struct AppInfo {
 
 #[tauri::command]
 fn app_info() -> AppInfo {
-    let cli = std::env::current_exe().ok().and_then(|p| p.parent().map(|d| d.join("rq.exe"))).map(|p| p.to_string_lossy().into_owned()).unwrap_or_default();
+    let cli = std::env::current_exe().ok().and_then(|p| p.parent().map(|d| d.join(rt::exe("rq")))).map(|p| p.to_string_lossy().into_owned()).unwrap_or_default();
     AppInfo { version: env!("CARGO_PKG_VERSION"), root: rt::root().to_string_lossy().into_owned(), cli }
 }
 
@@ -405,7 +404,7 @@ fn app_info() -> AppInfo {
 fn open_root() -> Result<(), String> {
     let r = rt::root();
     fs::create_dir_all(&r).map_err(|e| e.to_string())?;
-    Command::new("explorer.exe").arg(r).spawn().map(|_| ()).map_err(|e| e.to_string())
+    rt::open_folder(r)
 }
 
 fn toggle_window(app: &tauri::AppHandle) {
@@ -420,12 +419,53 @@ fn toggle_window(app: &tauri::AppHandle) {
 }
 
 /// One Runqora per install folder, so a second launch cannot add a second tray icon.
+#[cfg(windows)]
 fn instance_name(what: &str) -> Vec<u16> {
     let key: String = rt::root().to_string_lossy().to_lowercase().chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '_' }).collect();
     format!("Local\\Runqora_{what}_{key}\0").encode_utf16().collect()
 }
 
+/// The loopback port that stands for this install folder (49152 and up, where nothing is registered).
+#[cfg(unix)]
+fn instance_port() -> u16 {
+    let h = rt::root().to_string_lossy().bytes().fold(5381u32, |h, b| h.wrapping_mul(33) ^ u32::from(b));
+    49152 + (h % 16000) as u16
+}
+
+/// A second launch finds the port taken, tells the first copy to show itself, and quits.
+#[cfg(unix)]
+static INSTANCE: std::sync::Mutex<Option<std::net::TcpListener>> = std::sync::Mutex::new(None);
+
+#[cfg(unix)]
+fn already_running() -> bool {
+    use std::io::Write;
+    match std::net::TcpListener::bind(("127.0.0.1", instance_port())) {
+        Ok(l) => {
+            *INSTANCE.lock().unwrap_or_else(|e| e.into_inner()) = Some(l);
+            false
+        }
+        Err(_) => {
+            if let Ok(mut c) = std::net::TcpStream::connect_timeout(&std::net::SocketAddr::from(([127, 0, 0, 1], instance_port())), std::time::Duration::from_secs(1)) {
+                let _ = c.write_all(b"show");
+            }
+            true
+        }
+    }
+}
+
+#[cfg(unix)]
+fn listen_for_second_launch(app: tauri::AppHandle) {
+    let Some(l) = INSTANCE.lock().unwrap_or_else(|e| e.into_inner()).take() else { return };
+    std::thread::spawn(move || {
+        for _ in l.incoming().flatten() {
+            let a = app.clone();
+            let _ = app.run_on_main_thread(move || tray::show_window(&a));
+        }
+    });
+}
+
 /// True when another copy already runs here; it is then told to show its window (it may only be in the tray).
+#[cfg(windows)]
 fn already_running() -> bool {
     use windows_sys::Win32::{
         Foundation::{GetLastError, ERROR_ALREADY_EXISTS},
@@ -446,6 +486,7 @@ fn already_running() -> bool {
 }
 
 /// The running copy waits for the "show" signal from a second launch and opens its window.
+#[cfg(windows)]
 fn listen_for_second_launch(app: tauri::AppHandle) {
     use windows_sys::Win32::System::Threading::{CreateEventW, WaitForSingleObject};
     // SAFETY: the event handle lives as long as the process; the thread only waits on it
@@ -496,7 +537,7 @@ fn main() {
                     "login" => {
                         std::thread::spawn(|| match rt::set_launch_at_login(!rt::launch_at_login()) {
                             Ok(m) => rt::push_note("success", m),
-                            Err(e) => rt::push_note("error", format!("Start with Windows: {e}")),
+                            Err(e) => rt::push_note("error", format!("Start at sign-in: {e}")),
                         });
                     }
                     "quit" => app.exit(0), // servers keep running: they are independent processes

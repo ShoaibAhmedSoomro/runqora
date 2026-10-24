@@ -378,11 +378,11 @@ fn normalize(d: &Def, raw: &str) -> Result<String, String> {
 
 /// Ask PHP itself whether it knows a time zone name. None when PHP cannot answer (not runnable): then we do not block.
 fn timezone_known(root: &Path, tz: &str) -> Option<bool> {
-    use std::os::windows::process::CommandExt;
     if !tz.chars().all(|c| c.is_ascii_alphanumeric() || "/_+-".contains(c)) {
         return Some(false); // normalize already checks this; never put anything else on a command line
     }
-    let out = std::process::Command::new(root.join("php/php.exe")).args(["-n", "-r", &format!("echo in_array('{tz}', timezone_identifiers_list(DateTimeZone::ALL_WITH_BC), true) ? 'yes' : 'no';")]).creation_flags(0x0800_0000).output().ok()?;
+    use crate::CommandExt as _;
+    let out = std::process::Command::new(root.join("php").join(crate::exe("php"))).args(["-n", "-r", &format!("echo in_array('{tz}', timezone_identifiers_list(DateTimeZone::ALL_WITH_BC), true) ? 'yes' : 'no';")]).creation_flags(0x0800_0000).output().ok()?;
     match String::from_utf8_lossy(&out.stdout).trim() {
         "yes" => Some(true),
         "no" => Some(false),

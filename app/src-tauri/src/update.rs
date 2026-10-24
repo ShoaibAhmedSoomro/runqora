@@ -4,11 +4,11 @@
 //! Safety rules: only https downloads from known hosts, every archive checked against the publisher's SHA-256,
 //! never touch a running server, the user's configuration and data are carried over, the previous version is kept.
 
+use crate::CommandExt as _;
 use crate::{check_hash, component, fwd, manifest, push_note, read_marker, root, save_settings_in, settings, settings_in, start, state, stop, unpack_component, write_marker, Component};
 use serde::Serialize;
 use std::{
     fs,
-    os::windows::process::CommandExt,
     path::{Path, PathBuf},
     process::{Command, Stdio},
     time::{Duration, SystemTime, UNIX_EPOCH},
@@ -993,7 +993,7 @@ pub fn open_notes(url: &str) -> Result<(), String> {
     if !host_allowed(url, NOTES_HOSTS) {
         return Err("that address is not a release-notes page this app opens".into());
     }
-    Command::new("cmd").args(["/C", "start", "", url]).creation_flags(NO_WINDOW).spawn().map(|_| ()).map_err(|e| e.to_string())
+    crate::open_url(url)
 }
 
 #[cfg(test)]

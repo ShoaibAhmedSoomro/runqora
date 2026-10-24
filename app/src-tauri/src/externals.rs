@@ -2,10 +2,10 @@
 //! Both are licensed for their own installers only, so Runqora never downloads them; it finds them, starts and stops them and
 //! opens their own admin window. Their settings stay in their own windows.
 
+use crate::CommandExt as _;
 use crate::{win, Blocker, NO_WINDOW};
 use serde::Serialize;
 use std::{
-    os::windows::process::CommandExt,
     path::{Path, PathBuf},
     process::Command,
 };
@@ -24,6 +24,11 @@ struct External {
     get_url: &'static str,
 }
 
+/// FileZilla Server and Mercury are Windows programs: nothing to look for elsewhere.
+#[cfg(unix)]
+const EXTERNALS: &[External] = &[];
+
+#[cfg(windows)]
 const EXTERNALS: &[External] = &[
     External {
         id: "filezilla",

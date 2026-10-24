@@ -4,18 +4,33 @@ version = "0.2.3"
 edition = "2021"
 default-run = "runqora"
 
+[features]
+# the window (Tauri); the core and the rq command line build without it
+default = ["app"]
+app = ["dep:tauri", "dep:tauri-build"]
+
+[[bin]]
+name = "runqora"
+path = "src/main.rs"
+required-features = ["app"]
+
 [build-dependencies]
-tauri-build = { version = "2", features = [] }
+tauri-build = { version = "2", features = [], optional = true }
 
 [dependencies]
-tauri = { version = "2", features = ["tray-icon", "image-ico"] }
+tauri = { version = "2", features = ["tray-icon", "image-ico"], optional = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
+sha1 = "0.10"
 ureq = "2"
 zip = { version = "2", default-features = false, features = ["deflate"] }
+[target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_System_Threading", "Win32_Security_Cryptography", "Win32_NetworkManagement_IpHelper", "Win32_Networking_WinSock", "Win32_System_Services", "Win32_UI_Shell", "Win32_System_Registry", "Win32_System_Diagnostics_ToolHelp", "Win32_System_Console"] }
 
 # deps run unoptimised in debug otherwise: unzipping 90 MB takes minutes
 [profile.dev.package."*"]
 opt-level = 3
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"

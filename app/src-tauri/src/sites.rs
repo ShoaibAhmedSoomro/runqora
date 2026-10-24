@@ -1,11 +1,11 @@
 //! Sites: a folder served at http://name.localhost/ (and https:// when HTTPS is on), plus one-click WordPress.
 //! `*.localhost` resolves to this PC in every modern browser, so no hosts-file edit (and no administrator rights) is needed.
 
+use crate::CommandExt as _;
 use crate::{component, document_root, https, random_hex, refresh_extra, save_settings_in, settings_in, state, Settings, NO_WINDOW};
 use serde::Serialize;
 use std::{
     fs, io,
-    os::windows::process::CommandExt,
     path::{Path, PathBuf},
     process::{Command, Stdio},
 };

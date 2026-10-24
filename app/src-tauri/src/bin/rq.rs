@@ -74,7 +74,7 @@ fn main() -> ExitCode {
                         println!("{}", d.display());
                         ExitCode::SUCCESS
                     }
-                    None => report(std::process::Command::new("explorer.exe").arg(&d).spawn().map(|_| format!("Opened {}", d.display())).map_err(|e| e.to_string())),
+                    None => report(rt::open_folder(&d).map(|_| format!("Opened {}", d.display()))),
                 },
                 Err(e) => fail(e),
             }
@@ -494,8 +494,7 @@ fn open_module(id: &str) -> ExitCode {
             println!("{url}");
             return Ok(());
         }
-        use std::os::windows::process::CommandExt;
-        std::process::Command::new("cmd").args(["/C", "start", "", url]).creation_flags(0x0800_0000).spawn().map(|_| ()).map_err(|e| e.to_string())
+            rt::open_url(url)
     };
     report(rt::launch(id, &opener))
 }

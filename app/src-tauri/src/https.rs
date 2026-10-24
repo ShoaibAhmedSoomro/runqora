@@ -5,11 +5,11 @@
 //! confirmation) makes every site below it green. Nothing here touches Windows' trust store unless asked.
 //! Uses the openssl.exe that ships with Apache, so there is nothing extra to download.
 
+use crate::CommandExt as _;
 use crate::fwd;
 use serde::Serialize;
 use std::{
     fs,
-    os::windows::process::CommandExt,
     path::{Path, PathBuf},
     process::{Command, Stdio},
 };
@@ -30,7 +30,10 @@ pub fn ssl_dir(root: &Path) -> PathBuf {
 }
 
 fn openssl_exe(root: &Path) -> Result<PathBuf, String> {
-    let p = root.join("apache/bin/openssl.exe");
+    let p = root.join("apache/bin").join(crate::exe("openssl"));
+    if cfg!(unix) && !p.exists() {
+        return Ok("openssl".into()); // every Linux and macOS ships one
+    }
     p.exists().then_some(p).ok_or_else(|| "Apache's openssl.exe is missing; install Apache first".to_string())
 }
 
@@ -135,6 +138,27 @@ pub fn ensure(root: &Path, extra: &[String]) -> Result<HttpsStatus, String> {
     Ok(status(root))
 }
 
+#[cfg(unix)]
+fn run_ok(c: &mut Command) -> bool {
+    c.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).status().is_ok_and(|s| s.success())
+}
+
+/// Linux browsers read the user's NSS database; macOS uses the login keychain.
+#[cfg(target_os = "linux")]
+fn nssdb() -> String {
+    format!("sql:{}/.pki/nssdb", std::env::var("HOME").unwrap_or_default())
+}
+
+#[cfg(unix)]
+pub fn is_trusted(root: &Path) -> bool {
+    let ca = ssl_dir(root).join("ca.crt");
+    #[cfg(target_os = "macos")]
+    return ca.exists() && run_ok(Command::new("security").args(["verify-cert", "-c"]).arg(&ca));
+    #[cfg(not(target_os = "macos"))]
+    return ca.exists() && run_ok(Command::new("certutil").args(["-d", &nssdb(), "-L", "-n", CA_NAME]));
+}
+
+#[cfg(windows)]
 pub fn is_trusted(root: &Path) -> bool {
     let Some(fp) = fingerprint(root, "ca.crt") else { return false };
     let want = fp.replace(':', "").to_lowercase();
@@ -166,7 +190,34 @@ pub fn trust(root: &Path) -> Result<String, String> {
     if !ca.exists() {
         return Err("there is no certificate yet; turn HTTPS on first".into());
     }
-    let o = Command::new("certutil").args(["-user", "-addstore", "Root"]).arg(&ca).stdin(Stdio::null()).creation_flags(NO_WINDOW).output().map_err(|e| e.to_string())?;
+    #[cfg(target_os = "macos")]
+    {
+        let keychain = format!("{}/Library/Keychains/login.keychain-db", std::env::var("HOME").unwrap_or_default());
+        // macOS asks for the user's password itself
+        return if run_ok(Command::new("security").args(["add-trusted-cert", "-r", "trustRoot", "-k", &keychain]).arg(&ca)) && is_trusted(root) {
+            Ok("This Mac now trusts your Runqora certificate. Restart your browser if it still warns.".into())
+        } else {
+            Err("macOS did not add the certificate (the confirmation was declined or blocked)".into())
+        };
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let db = nssdb();
+        let _ = fs::create_dir_all(format!("{}/.pki/nssdb", std::env::var("HOME").unwrap_or_default()));
+        let _ = run_ok(Command::new("certutil").args(["-d", &db, "-N", "--empty-password"])); // creates the database when there is none
+        return if run_ok(Command::new("certutil").args(["-d", &db, "-A", "-t", "C,,", "-n", CA_NAME, "-i"]).arg(&ca)) && is_trusted(root) {
+            Ok("Chrome, Chromium and Edge now trust your Runqora certificate. Firefox has its own list: import the file in its Settings, or set security.enterprise_roots.enabled. Restart the browser.".into())
+        } else {
+            Err(format!("Linux has no single place for this. Install the `certutil` tool (package libnss3-tools or nss-tools) and press the button again, or trust {} yourself: sudo cp it to /usr/local/share/ca-certificates/runqora.crt && sudo update-ca-certificates", ca.display()))
+        };
+    }
+    #[cfg(windows)]
+    windows_trust(root, &ca)
+}
+
+#[cfg(windows)]
+fn windows_trust(root: &Path, ca: &Path) -> Result<String, String> {
+    let o = Command::new("certutil").args(["-user", "-addstore", "Root"]).arg(ca).stdin(Stdio::null()).creation_flags(NO_WINDOW).output().map_err(|e| e.to_string())?;
     if o.status.success() && is_trusted(root) {
         Ok("This PC now trusts your Runqora certificate. Restart your browser if it still warns.".into())
     } else {
@@ -178,6 +229,24 @@ pub fn untrust(root: &Path) -> Result<String, String> {
     if !is_trusted(root) {
         return Ok("The certificate is not trusted on this PC.".into());
     }
+    #[cfg(unix)]
+    {
+        let ca = ssl_dir(root).join("ca.crt");
+        #[cfg(target_os = "macos")]
+        let removed = run_ok(Command::new("security").args(["remove-trusted-cert"]).arg(&ca));
+        #[cfg(target_os = "linux")]
+        let removed = {
+            let _ = &ca;
+            run_ok(Command::new("certutil").args(["-d", &nssdb(), "-D", "-n", CA_NAME]))
+        };
+        return if removed && !is_trusted(root) { Ok("This computer no longer trusts your Runqora certificate.".into()) } else { Err("the certificate could not be removed".into()) };
+    }
+    #[cfg(windows)]
+    windows_untrust(root)
+}
+
+#[cfg(windows)]
+fn windows_untrust(root: &Path) -> Result<String, String> {
     let fp = fingerprint(root, "ca.crt").unwrap_or_default().replace(':', "");
     let o = Command::new("certutil").args(["-user", "-delstore", "Root", &fp]).stdin(Stdio::null()).creation_flags(NO_WINDOW).output().map_err(|e| e.to_string())?;
     if o.status.success() && !is_trusted(root) { Ok("This PC no longer trusts your Runqora certificate.".into()) } else { Err("Windows did not remove the certificate".into()) }

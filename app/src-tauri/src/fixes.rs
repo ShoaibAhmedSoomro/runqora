@@ -4,10 +4,11 @@
 //! Nothing here trusts the window: a process is only ended if it is currently listening on a port, is not part of
 //! Windows, and is not Runqora itself, and the answer to "may I?" is recomputed on every call.
 
+use crate::CommandExt as _;
 use crate::config::{ini_get, ini_set, parse_line};
 use crate::{component, component_with, describe_blocker, fwd, manifest, read_pid, refresh_extra, replace_pma_port, rewrite_conf, settings_in, state, win, Component};
 use serde::Serialize;
-use std::{collections::BTreeSet, fs, os::windows::process::CommandExt, path::Path, process::Command, thread::sleep, time::Duration};
+use std::{collections::BTreeSet, fs, path::Path, process::Command, thread::sleep, time::Duration};
 
 // ---- ports ----
 
@@ -27,9 +28,15 @@ pub struct Remedy {
     pub detail: String,
 }
 
-const PROTECTED: &[&str] = &["system", "registry", "smss.exe", "csrss.exe", "wininit.exe", "services.exe", "lsass.exe", "winlogon.exe", "dwm.exe"];
+const PROTECTED: &[&str] = &["init", "systemd", "launchd", "kernel_task", "system", "registry", "smss.exe", "csrss.exe", "wininit.exe", "services.exe", "lsass.exe", "winlogon.exe", "dwm.exe"];
 
 /// Service names hosted by a process (`tasklist /svc`), no admin rights needed.
+#[cfg(unix)]
+pub fn services_in_process(_pid: u32) -> Vec<String> {
+    Vec::new() // no Windows services here
+}
+
+#[cfg(windows)]
 pub fn services_in_process(pid: u32) -> Vec<String> {
     let out = Command::new("tasklist").args(["/svc", "/FI", &format!("PID eq {pid}"), "/FO", "CSV", "/NH"]).creation_flags(0x0800_0000).output().map(|o| String::from_utf8_lossy(&o.stdout).into_owned()).unwrap_or_default();
     out.lines().next().and_then(|l| l.split("\",\"").nth(2)).map(|s| s.trim_matches('"').split(',').map(str::trim).filter(|s| !s.is_empty() && *s != "N/A").map(String::from).collect()).unwrap_or_default()
@@ -89,7 +96,7 @@ pub fn end_process(root: &Path, pid: u32) -> Result<String, String> {
                 return Err(format!("could not end {} (taskkill returned {rc})", r.name));
             }
         }
-        Err(e) => return Err(format!("could not end {} (Windows error {e})", r.name)),
+        Err(e) => return Err(format!("could not end {} (error {e}; it may belong to another user)", r.name)),
     }
     if gone(pid) { Ok(format!("{} was ended and its port is free", r.name)) } else { Err(format!("{} is still running", r.name)) }
 }

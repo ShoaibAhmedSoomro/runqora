@@ -5,15 +5,64 @@ use std::{
     fs,
     io::{self, Read},
     sync::Mutex,
-    os::windows::process::CommandExt,
     path::{Path, PathBuf},
     process::{Command, Stdio},
     thread::sleep,
     time::Duration,
 };
 
+#[cfg(windows)]
+pub use std::os::windows::process::CommandExt;
+
 const NO_WINDOW: u32 = 0x0800_0000;
+#[cfg(windows)]
 const MANIFEST: &str = include_str!("../manifest.json");
+#[cfg(unix)]
+const MANIFEST: &str = include_str!("../manifest.unix.json");
+
+/// The Windows-only `creation_flags(NO_WINDOW)` calls stay as they are; here they put the child in its own process group
+/// (so a stop can end the whole tree, and Ctrl-C in a terminal does not reach the servers).
+#[cfg(unix)]
+pub trait CommandExt {
+    fn creation_flags(&mut self, flags: u32) -> &mut Self;
+}
+#[cfg(unix)]
+impl CommandExt for Command {
+    fn creation_flags(&mut self, _flags: u32) -> &mut Self {
+        std::os::unix::process::CommandExt::process_group(self, 0)
+    }
+}
+
+/// Open a web address in the default browser. Callers pass addresses they built themselves, never text from the UI.
+pub fn open_url(url: &str) -> Result<(), String> {
+    #[cfg(windows)]
+    let mut c = {
+        let mut c = Command::new("cmd");
+        c.args(["/C", "start", "", url]).creation_flags(NO_WINDOW);
+        c
+    };
+    #[cfg(not(windows))]
+    let mut c = {
+        let mut c = Command::new(if cfg!(target_os = "macos") { "open" } else { "xdg-open" });
+        c.arg(url).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+        c
+    };
+    c.spawn().map(|_| ()).map_err(|e| e.to_string())
+}
+
+/// Show a folder in the file manager.
+pub fn open_folder(dir: impl AsRef<Path>) -> Result<(), String> {
+    let mut c = Command::new(if cfg!(windows) { "explorer.exe" } else if cfg!(target_os = "macos") { "open" } else { "xdg-open" });
+    c.arg(dir.as_ref());
+    #[cfg(not(windows))]
+    c.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+    c.spawn().map(|_| ()).map_err(|e| e.to_string())
+}
+
+/// `name` with the platform's program suffix.
+pub fn exe(name: &str) -> String {
+    if cfg!(windows) { format!("{name}.exe") } else { name.to_string() }
+}
 const EXTRA_CONF: &str = "conf/extra/runqora.conf";
 
 #[derive(Deserialize, Clone)]
@@ -136,22 +185,60 @@ pub fn component_with(id: &str, s: &Settings) -> Result<Component, String> {
     Ok(c)
 }
 
+#[cfg(windows)]
 const RUN_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
 
-/// Is Runqora set to open (hidden, in the tray) when this user signs in to Windows?
+/// The file that starts Runqora at sign-in: a freedesktop autostart entry on Linux, a LaunchAgent on macOS.
+#[cfg(unix)]
+fn autostart_file() -> Option<PathBuf> {
+    let home = PathBuf::from(std::env::var_os("HOME")?);
+    Some(if cfg!(target_os = "macos") { home.join("Library/LaunchAgents/app.runqora.plist") } else { std::env::var_os("XDG_CONFIG_HOME").map(PathBuf::from).unwrap_or_else(|| home.join(".config")).join("autostart/runqora.desktop") })
+}
+
+/// Is Runqora set to open (hidden, in the tray) when this user signs in?
+#[cfg(windows)]
 pub fn launch_at_login() -> bool {
     win::reg_get_string(RUN_KEY, "Runqora").is_some_and(|v| v.to_lowercase().contains("runqora"))
+}
+#[cfg(unix)]
+pub fn launch_at_login() -> bool {
+    autostart_file().is_some_and(|f| f.exists())
+}
+
+/// The text of the sign-in entry for the program at `exe`.
+#[cfg(unix)]
+pub fn autostart_entry(exe: &Path) -> String {
+    if cfg!(target_os = "macos") {
+        format!("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<plist version=\"1.0\"><dict><key>Label</key><string>app.runqora</string><key>ProgramArguments</key><array><string>{}</string><string>--hidden</string></array><key>RunAtLoad</key><true/></dict></plist>\n", exe.display())
+    } else {
+        format!("[Desktop Entry]\nType=Application\nName=Runqora\nExec=\"{}\" --hidden\nX-GNOME-Autostart-enabled=true\n", exe.display())
+    }
 }
 
 /// Turn "start when I sign in" on or off. Only this user's Run key is touched, and only when the user flips the setting.
 pub fn set_launch_at_login(on: bool) -> Result<String, String> {
-    if !on {
-        win::reg_delete(RUN_KEY, "Runqora");
-        return Ok("Runqora will not open when you sign in".into());
+    #[cfg(windows)]
+    {
+        if !on {
+            win::reg_delete(RUN_KEY, "Runqora");
+            return Ok("Runqora will not open when you sign in".into());
+        }
+        let exe = std::env::current_exe().ok().and_then(|p| p.parent().map(|d| d.join("runqora.exe"))).filter(|p| p.exists()).ok_or("the Runqora program was not found next to this one; change this setting from the window")?;
+        win::reg_set_string(RUN_KEY, "Runqora", &format!("\"{}\" --hidden", exe.display())).map_err(|e| format!("Windows refused (error {e})"))?;
+        Ok("Runqora will open in the tray when you sign in".into())
     }
-    let exe = std::env::current_exe().ok().and_then(|p| p.parent().map(|d| d.join("runqora.exe"))).filter(|p| p.exists()).ok_or("the Runqora program was not found next to this one; change this setting from the window")?;
-    win::reg_set_string(RUN_KEY, "Runqora", &format!("\"{}\" --hidden", exe.display())).map_err(|e| format!("Windows refused (error {e})"))?;
-    Ok("Runqora will open in the tray when you sign in".into())
+    #[cfg(unix)]
+    {
+        let f = autostart_file().ok_or("this account has no home folder")?;
+        if !on {
+            let _ = fs::remove_file(&f);
+            return Ok("Runqora will not open when you sign in".into());
+        }
+        let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+        fs::create_dir_all(f.parent().unwrap_or(Path::new("."))).map_err(|e| e.to_string())?;
+        fs::write(&f, autostart_entry(&exe)).map_err(|e| e.to_string())?;
+        Ok("Runqora will open in the tray when you sign in".into())
+    }
 }
 
 pub fn root() -> PathBuf {
@@ -159,7 +246,11 @@ pub fn root() -> PathBuf {
     if let Some(d) = std::env::var_os("RUNQORA_DIR") {
         return PathBuf::from(d);
     }
+    #[cfg(unix)]
+    return PathBuf::from(std::env::var_os("HOME").unwrap_or_else(|| "/tmp".into())).join("Runqora");
+    #[cfg(windows)]
     let (new, old) = (PathBuf::from(r"C:\Runqora"), PathBuf::from(r"C:\runtime-easy"));
+    #[cfg(windows)]
     // an install made before the rename keeps working in place
     if !new.exists() && (old.join("apache").exists() || old.join("settings.json").exists()) { old } else { new }
 }
@@ -362,8 +453,20 @@ pub fn configure_php_ini(ini: &str, php_dir: &Path) -> String {
 }
 
 pub fn random_hex(bytes: usize) -> Result<String, String> {
-    use windows_sys::Win32::Security::Cryptography::BCryptGenRandom;
+    #[allow(unused_mut)]
     let mut buf = vec![0u8; bytes];
+    #[cfg(unix)]
+    {
+        fs::File::open("/dev/urandom").and_then(|mut f| f.read_exact(&mut buf)).map_err(|e| format!("system RNG failed: {e}"))?;
+        Ok(buf.iter().map(|b| format!("{b:02x}")).collect())
+    }
+    #[cfg(windows)]
+    random_hex_windows(buf)
+}
+
+#[cfg(windows)]
+fn random_hex_windows(mut buf: Vec<u8>) -> Result<String, String> {
+    use windows_sys::Win32::Security::Cryptography::BCryptGenRandom;
     // SAFETY: buf is valid for buf.len() bytes; null algorithm + flag 2 = system RNG
     let status = unsafe { BCryptGenRandom(std::ptr::null_mut(), buf.as_mut_ptr(), buf.len() as u32, 2) };
     if status != 0 {
@@ -408,7 +511,7 @@ pub fn post_install(c: &Component, root: &Path) -> Result<(), String> {
             write_new(dir.join("my.ini"), ini)?;
             if !dir.join("data/mysql").is_dir() {
                 // the zip ships no initialised data directory
-                let out = Command::new(dir.join("bin/mariadb-install-db.exe"))
+                let out = Command::new(dir.join("bin").join(exe("mariadb-install-db")))
                     .arg(format!("--datadir={r}/data"))
                     .stdin(Stdio::null())
                     .creation_flags(NO_WINDOW)
@@ -421,8 +524,19 @@ pub fn post_install(c: &Component, root: &Path) -> Result<(), String> {
         }
         "composer" => {
             // `composer` on the command line: runs the phar with Runqora's PHP
-            let bat = format!("@echo off\r\n\"{}\\php\\php.exe\" \"%~dp0composer.phar\" %*\r\n", root.display());
-            fs::write(dir.join("composer.bat"), bat).map_err(|e| e.to_string())?;
+            #[cfg(windows)]
+            {
+                let bat = format!("@echo off\r\n\"{}\\php\\php.exe\" \"%~dp0composer.phar\" %*\r\n", root.display());
+                fs::write(dir.join("composer.bat"), bat).map_err(|e| e.to_string())?;
+            }
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let sh = format!("#!/bin/sh\nexec \"{}/php/php\" \"$(dirname \"$0\")/composer.phar\" \"$@\"\n", fwd(root));
+                let f = dir.join("composer");
+                fs::write(&f, sh).map_err(|e| e.to_string())?;
+                fs::set_permissions(&f, fs::Permissions::from_mode(0o755)).map_err(|e| e.to_string())?;
+            }
         }
         "tomcat" => {
             let xml = dir.join("conf/server.xml");
@@ -476,7 +590,7 @@ pub fn set_mail_lines(ini: &str, port: u16) -> String {
 /// PHP's mail() delivers to Mailpit (SMTP on 1025) once both are installed, whichever came first.
 pub fn wire_mail(root: &Path) -> Result<(), String> {
     let ini = root.join("php/php.ini");
-    if !root.join("mailpit/mailpit.exe").exists() {
+    if !root.join("mailpit").join(exe("mailpit")).exists() {
         return Ok(());
     }
     match fs::read_to_string(&ini) {
@@ -666,11 +780,12 @@ pub fn sha512_file(p: &Path) -> io::Result<String> {
     Ok(h.finalize().iter().map(|b| format!("{b:02x}")).collect())
 }
 
-/// SHA-1 through Windows' own certutil: the only publisher that needs it (WordPress) offers nothing stronger,
-/// and a crate for one hash is not worth it.
+/// SHA-1: the only publisher that needs it (WordPress) offers nothing stronger.
 pub fn sha1_file(p: &Path) -> Result<String, String> {
-    let o = Command::new("certutil").args(["-hashfile"]).arg(p).arg("SHA1").stdin(Stdio::null()).creation_flags(NO_WINDOW).output().map_err(|e| e.to_string())?;
-    String::from_utf8_lossy(&o.stdout).lines().nth(1).map(|l| l.replace(' ', "").to_lowercase()).filter(|h| h.len() == 40).ok_or_else(|| "certutil could not hash the download".to_string())
+    use sha1::Digest as _;
+    let mut h = sha1::Sha1::new();
+    io::copy(&mut fs::File::open(p).map_err(|e| e.to_string())?, &mut h).map_err(|e| e.to_string())?;
+    Ok(h.finalize().iter().map(|b| format!("{b:02x}")).collect())
 }
 
 /// The download must match the publisher's hash (the strongest one the manifest has).
@@ -776,6 +891,11 @@ pub mod https;
 pub mod sites;
 pub mod update;
 
+#[cfg(unix)]
+#[path = "unixos.rs"]
+pub mod win;
+
+#[cfg(windows)]
 pub mod win {
     use std::{mem, ptr};
     use windows_sys::Win32::Foundation::{CloseHandle, GetLastError};
@@ -1148,11 +1268,18 @@ pub fn start(c: &Component, root: &Path) -> Result<String, String> {
                 .creation_flags(NO_WINDOW)
                 .spawn()
                 .map_err(|e| e.to_string())?;
+            #[allow(unused_mut)]
+            let mut child = child;
             if c.write_pid {
                 let p = root.join(&c.pidfile);
                 let _ = fs::create_dir_all(p.parent().unwrap_or(root));
                 fs::write(p, child.id().to_string()).map_err(|e| e.to_string())?;
             }
+            // a server that ends while Runqora runs must not linger as a zombie that still looks alive
+            #[cfg(unix)]
+            std::thread::spawn(move || {
+                let _ = child.wait();
+            });
         }
     }
     for _ in 0..100 {
@@ -1172,6 +1299,12 @@ pub fn start(c: &Component, root: &Path) -> Result<String, String> {
     Err(format!("{} did not come up{note}; check the logs under {}", c.name, c.extract_to))
 }
 
+#[cfg(unix)]
+pub fn signal_shutdown(_event: &str) -> bool {
+    false // named events are a Windows thing; modules with no other graceful channel get SIGTERM
+}
+
+#[cfg(windows)]
 pub fn signal_shutdown(event: &str) -> bool {
     use windows_sys::Win32::System::Threading::{OpenEventW, SetEvent};
     let name: Vec<u16> = format!("{event}\0").encode_utf16().collect();
@@ -1213,7 +1346,10 @@ pub fn stop(c: &Component, root: &Path) -> Result<String, String> {
         }
     }
     // graceful signal ignored for 15 s: force the tree
+    #[cfg(windows)]
     let _ = Command::new("taskkill").args(["/PID", &pid.to_string(), "/T", "/F"]).creation_flags(NO_WINDOW).output();
+    #[cfg(unix)]
+    win::kill_tree(pid);
     Ok(format!("{} did not stop gracefully; terminated PID {}", c.name, pid))
 }
 
@@ -1265,8 +1401,12 @@ pub fn open_file(c: &Component, root: &Path, rel: &str) -> Result<(), String> {
     if !path.exists() {
         return Err(format!("{rel} does not exist yet"));
     }
-    let editor = std::env::var("RUNQORA_EDITOR").ok().or_else(|| Some(settings().editor).filter(|e| !e.is_empty())).unwrap_or_else(|| "notepad.exe".into());
+    let editor = std::env::var("RUNQORA_EDITOR").ok().or_else(|| Some(settings().editor).filter(|e| !e.is_empty())).unwrap_or_else(|| default_editor().into());
     Command::new(editor).arg(path).spawn().map(|_| ()).map_err(|e| e.to_string())
+}
+
+fn default_editor() -> &'static str {
+    if cfg!(windows) { "notepad.exe" } else if cfg!(target_os = "macos") { "open" } else { "xdg-open" }
 }
 
 pub fn admin_url(c: &Component) -> Option<String> {
@@ -1515,7 +1655,13 @@ pub fn abgr_to_hex(v: u32) -> String {
     format!("#{:02X}{:02X}{:02X}", v & 0xFF, (v >> 8) & 0xFF, (v >> 16) & 0xFF)
 }
 
-/// The accent colour from Windows' personalisation settings, if it can be read.
+/// The accent colour from the system's personalisation settings, if it can be read (only Windows has one to read).
+#[cfg(unix)]
+pub fn system_accent() -> Option<String> {
+    None
+}
+
+#[cfg(windows)]
 pub fn system_accent() -> Option<String> {
     win::reg_dword(r"Software\Microsoft\Windows\CurrentVersion\Explorer\Accent", "AccentColorMenu")
         .or_else(|| win::reg_dword(r"Software\Microsoft\Windows\DWM", "AccentColor"))

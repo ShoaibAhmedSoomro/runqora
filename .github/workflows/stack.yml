@@ -73,16 +73,55 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           cd dist
-          python3 - <<'PY'
-          import hashlib, json, glob, os
-          out = {"tag": "${{ inputs.tag || '1' }}"}
-          for f in sorted(glob.glob("*.tar.gz")):
-              prog, rest = f.split("-", 1)               # apache-2.4.66-linux-x86_64.tar.gz
-              plat = rest.rsplit("-", 2)[-2] + "-" + rest.rsplit("-", 1)[-1].removesuffix(".tar.gz")
-              out[f"{prog}-{plat}"] = hashlib.sha256(open(f, "rb").read()).hexdigest()
-          json.dump(out, open("stack.json", "w"), indent=1)
-          print(json.dumps(out, indent=1))
-          PY
+          python3 ../scripts/stack/stack-json.py . "${{ inputs.tag || '1' }}"
           gh release create "stack-${{ inputs.tag || '1' }}" --repo "$GITHUB_REPOSITORY" --prerelease --title "Stack ${{ inputs.tag || '1' }}" \
             --notes "Apache, PHP and MariaDB builds for Linux and macOS that Runqora installs. Built by the Stack workflow." *.tar.gz stack.json \
             || gh release upload "stack-${{ inputs.tag || '1' }}" --repo "$GITHUB_REPOSITORY" --clobber *.tar.gz stack.json
+  e2e:
+    needs: build
+    if: ${{ !cancelled() }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - { plat: linux-x86_64, runner: ubuntu-22.04 }
+          - { plat: linux-aarch64, runner: ubuntu-22.04-arm }
+          - { plat: macos-aarch64, runner: macos-14 }
+    runs-on: ${{ matrix.os.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: "*-${{ matrix.os.plat }}"
+          path: dist
+          merge-multiple: true
+      - name: Do all three bundles exist?
+        id: have
+        run: |
+          ls -l dist || true
+          if ls dist/apache-* dist/php-* dist/mariadb-* >/dev/null 2>&1; then echo "all=yes" >> "$GITHUB_OUTPUT"; else echo "all=no" >> "$GITHUB_OUTPUT"; fi
+      - name: Linux libraries
+        if: steps.have.outputs.all == 'yes' && runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libgtk-3-dev patchelf libssl-dev curl
+      - uses: dtolnay/rust-toolchain@stable
+        if: steps.have.outputs.all == 'yes'
+      - uses: Swatinem/rust-cache@v2
+        if: steps.have.outputs.all == 'yes'
+        with:
+          workspaces: app/src-tauri
+      - name: Build rq
+        if: steps.have.outputs.all == 'yes'
+        working-directory: app/src-tauri
+        run: cargo build --bin rq
+      - name: Install from the new bundles and test the whole stack
+        if: steps.have.outputs.all == 'yes'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 scripts/stack/stack-json.py dist local
+          (cd dist && python3 -m http.server 8765 --bind 127.0.0.1 >/dev/null 2>&1 &)
+          python3 scripts/gen-unix-manifest.py --stack dist/stack.json --url-base http://127.0.0.1:8765 --out "$RUNNER_TEMP/manifest.json"
+          chmod +x e2e/unix.sh
+          e2e/unix.sh "$PWD/app/src-tauri/target/debug/rq" "$RUNNER_TEMP/manifest.json"

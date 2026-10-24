@@ -203,6 +203,10 @@ pub fn manifest_for(text: &str, platform: &str) -> Manifest {
 }
 
 pub fn manifest() -> Manifest {
+    // a hook for tests and CI: read the list of downloads from another file
+    if let Some(text) = std::env::var_os("RUNQORA_MANIFEST").and_then(|p| fs::read_to_string(p).ok()) {
+        return manifest_for(&text, &platform());
+    }
     manifest_for(MANIFEST, &platform())
 }
 

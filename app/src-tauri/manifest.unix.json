@@ -2,6 +2,130 @@
   "schema": 1,
   "components": [
     {
+      "id": "apache",
+      "name": "Apache HTTP Server",
+      "version": "2.4.66",
+      "url": "",
+      "sha256": "",
+      "strip_prefix": "",
+      "extract_to": "apache",
+      "binary": "apache/bin/httpd",
+      "args": [
+        "-d",
+        "{root}/apache"
+      ],
+      "pidfile": "apache/logs/httpd.pid",
+      "port": 8000,
+      "admin_url": "http://localhost:{port}/",
+      "configs": [
+        "apache/conf/httpd.conf",
+        "apache/conf/extra/runqora.conf"
+      ],
+      "logs": [
+        "apache/logs/error_log",
+        "apache/logs/access_log"
+      ],
+      "variants": {
+        "linux-x86_64": {
+          "url": "https://github.com/ShoaibAhmedSoomro/runqora/releases/download/stack-1/apache-2.4.66-linux-x86_64.tar.gz",
+          "sha256": "25bfd68574baf47e8e5e369bc14d43c0aa08384b53ccbb43d480eab2358bc46b",
+          "strip_prefix": ""
+        },
+        "linux-aarch64": {
+          "url": "https://github.com/ShoaibAhmedSoomro/runqora/releases/download/stack-1/apache-2.4.66-linux-aarch64.tar.gz",
+          "sha256": "98ea56425d207cc0f1a1bdea1f75854c572e4f3ea5ff4ed95041c287baf0df91",
+          "strip_prefix": ""
+        },
+        "macos-aarch64": {
+          "url": "https://github.com/ShoaibAhmedSoomro/runqora/releases/download/stack-1/apache-2.4.66-macos-aarch64.tar.gz",
+          "sha256": "165be023fda8cb516f1a55dc6219293058de5cee235bf60533c819db0ceb6a17",
+          "strip_prefix": ""
+        }
+      }
+    },
+    {
+      "id": "php",
+      "name": "PHP (FPM)",
+      "version": "8.3.32",
+      "url": "",
+      "sha256": "",
+      "strip_prefix": "",
+      "extract_to": "php",
+      "binary": "php/php-fpm",
+      "args": [
+        "--nodaemonize",
+        "--fpm-config",
+        "{root}/php/php-fpm.conf",
+        "-c",
+        "{root}/php/php.ini"
+      ],
+      "pidfile": "php/php-fpm.pid",
+      "port": 9074,
+      "configs": [
+        "php/php.ini",
+        "php/php-fpm.conf"
+      ],
+      "logs": [
+        "php/php-fpm.log"
+      ],
+      "variants": {
+        "linux-x86_64": {
+          "url": "https://github.com/ShoaibAhmedSoomro/runqora/releases/download/stack-1/php-8.3.32-linux-x86_64.tar.gz",
+          "sha256": "a0ead5bb3def36696267d7ef855cd5f2a41d789a3243592197b66d1c0658d50c",
+          "strip_prefix": ""
+        },
+        "linux-aarch64": {
+          "url": "https://github.com/ShoaibAhmedSoomro/runqora/releases/download/stack-1/php-8.3.32-linux-aarch64.tar.gz",
+          "sha256": "b0e1e470316969dfa46a61bab5b90174e61e048e5198bb08f8864eb6c1ce738e",
+          "strip_prefix": ""
+        },
+        "macos-aarch64": {
+          "url": "https://github.com/ShoaibAhmedSoomro/runqora/releases/download/stack-1/php-8.3.32-macos-aarch64.tar.gz",
+          "sha256": "5c1a7af18160e6ebfdd4500feee9352b97d6f8bde8418b7d087affecf9198086",
+          "strip_prefix": ""
+        }
+      }
+    },
+    {
+      "id": "mariadb",
+      "name": "MariaDB",
+      "version": "10.11.19",
+      "url": "",
+      "sha256": "",
+      "strip_prefix": "",
+      "extract_to": "mariadb",
+      "binary": "mariadb/bin/mariadbd",
+      "args": [
+        "--defaults-file={root}/mariadb/my.ini"
+      ],
+      "pidfile": "mariadb/data/mysql.pid",
+      "port": 3306,
+      "admin_url": "http://localhost:{apache_port}/phpmyadmin/",
+      "configs": [
+        "mariadb/my.ini"
+      ],
+      "logs": [
+        "mariadb/data/mysql_error.log"
+      ],
+      "variants": {
+        "linux-x86_64": {
+          "url": "https://github.com/ShoaibAhmedSoomro/runqora/releases/download/stack-1/mariadb-10.11.19-linux-x86_64.tar.gz",
+          "sha256": "4094b3ef0bb103b03b588a8f3ec932c3268001200fd424faaa7eaa9279674f1f",
+          "strip_prefix": ""
+        },
+        "linux-aarch64": {
+          "url": "https://github.com/ShoaibAhmedSoomro/runqora/releases/download/stack-1/mariadb-10.11.19-linux-aarch64.tar.gz",
+          "sha256": "e861620f57cd362ba6e00f16f22b6cbe62f96a66a1ca5d3ac8705d1120ec0a27",
+          "strip_prefix": ""
+        },
+        "macos-aarch64": {
+          "url": "https://github.com/ShoaibAhmedSoomro/runqora/releases/download/stack-1/mariadb-10.11.19-macos-aarch64.tar.gz",
+          "sha256": "32dba73a2b3e9e81a29298bf1039eb20ff09ac5b452be52cf95da15bdb215b64",
+          "strip_prefix": ""
+        }
+      }
+    },
+    {
       "id": "phpmyadmin",
       "name": "phpMyAdmin",
       "version": "5.2.3",
@@ -19,6 +143,8 @@
       "id": "jre",
       "name": "Java runtime (Temurin 21)",
       "version": "21.0.12.1",
+      "url": "",
+      "sha256": "",
       "strip_prefix": "*",
       "extract_to": "jre",
       "binary": "jre/bin/java",
@@ -38,15 +164,14 @@
           "sha256": "dec50fc6f9fcd4fe3ae8cabf5a5fa68f6afc48841f7698e468e9aa5d54beed84",
           "strip_prefix": "jdk-21.0.12.1+1-jre/Contents/Home/"
         }
-      },
-      "url": "",
-      "sha256": ""
+      }
     },
     {
       "id": "tomcat",
       "name": "Apache Tomcat",
       "version": "10.1.61",
       "url": "https://archive.apache.org/dist/tomcat/tomcat-10/v10.1.61/bin/apache-tomcat-10.1.61.tar.gz",
+      "sha512": "35120a2b1182bac3d55438fbec0dc581d03b0f1c16ce692a930f3bb6a1097cf896b94b389152257071a87cb2928ac8c15f1bad08387c14acc7c17dbc1bb598fb",
       "strip_prefix": "apache-tomcat-10.1.61/",
       "extract_to": "tomcat",
       "binary": "tomcat/bin/bootstrap.jar",
@@ -81,7 +206,6 @@
         "tomcat/conf/server.xml",
         "tomcat/conf/tomcat-users.xml"
       ],
-      "sha512": "35120a2b1182bac3d55438fbec0dc581d03b0f1c16ce692a930f3bb6a1097cf896b94b389152257071a87cb2928ac8c15f1bad08387c14acc7c17dbc1bb598fb",
       "sha256": ""
     },
     {

@@ -1,0 +1,12 @@
+{
+ "tag": "1",
+ "apache-linux-aarch64": "98ea56425d207cc0f1a1bdea1f75854c572e4f3ea5ff4ed95041c287baf0df91",
+ "apache-linux-x86_64": "25bfd68574baf47e8e5e369bc14d43c0aa08384b53ccbb43d480eab2358bc46b",
+ "apache-macos-aarch64": "165be023fda8cb516f1a55dc6219293058de5cee235bf60533c819db0ceb6a17",
+ "mariadb-linux-aarch64": "e861620f57cd362ba6e00f16f22b6cbe62f96a66a1ca5d3ac8705d1120ec0a27",
+ "mariadb-linux-x86_64": "4094b3ef0bb103b03b588a8f3ec932c3268001200fd424faaa7eaa9279674f1f",
+ "mariadb-macos-aarch64": "32dba73a2b3e9e81a29298bf1039eb20ff09ac5b452be52cf95da15bdb215b64",
+ "php-linux-aarch64": "b0e1e470316969dfa46a61bab5b90174e61e048e5198bb08f8864eb6c1ce738e",
+ "php-linux-x86_64": "a0ead5bb3def36696267d7ef855cd5f2a41d789a3243592197b66d1c0658d50c",
+ "php-macos-aarch64": "5c1a7af18160e6ebfdd4500feee9352b97d6f8bde8418b7d087affecf9198086"
+}

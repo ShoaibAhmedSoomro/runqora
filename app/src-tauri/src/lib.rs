@@ -331,7 +331,7 @@ pub fn validate(c: &Component) -> Result<(), String> {
     if !rel(&c.extract_to) || !rel(&c.binary) || (c.args.is_some() && !rel(&c.pidfile)) || (!c.exe.is_empty() && !rel(&c.exe)) {
         return Err(format!("{}: paths must be relative with no ..", c.id));
     }
-    if c.args.is_some() && (c.port == 0 || (c.shutdown_event.is_empty() && !c.write_pid)) {
+    if c.args.is_some() && (c.port == 0 || (cfg!(windows) && c.shutdown_event.is_empty() && !c.write_pid)) {
         return Err(format!("{}: a server needs a port and a shutdown_event (or write_pid)", c.id));
     }
     if !c.configs.iter().chain(&c.logs).all(|p| rel(p)) {

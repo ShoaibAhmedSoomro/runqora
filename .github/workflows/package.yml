@@ -46,15 +46,19 @@ jobs:
           rq status | head -3
           export RUNQORA_DIR="$RUNNER_TEMP/rq-smoke"
           dbus-run-session -- xvfb-run -a bash -c 'runqora --hidden & pid=$!; sleep 12; if kill -0 $pid 2>/dev/null; then echo "the app is running"; kill $pid; else echo "the app exited early"; wait $pid; exit 1; fi'
-      - name: Start the app (macOS)
+      - name: Start the app from the disk image (macOS)
         if: runner.os == 'macOS'
         run: |
-          app=$(ls -d app/src-tauri/target/release/bundle/macos/*.app | head -1)
+          hdiutil attach app/src-tauri/target/release/bundle/dmg/*.dmg -nobrowse -mountpoint "$RUNNER_TEMP/rqdmg"
+          app="$RUNNER_TEMP/rqdmg/Runqora.app"
+          ls "$app/Contents/MacOS"
           codesign -dv "$app" 2>&1 | head -5 || true
           export RUNQORA_DIR="$RUNNER_TEMP/rq-smoke"
+          "$app/Contents/MacOS/rq" status | head -3
           "$app/Contents/MacOS/runqora" --hidden & pid=$!
           sleep 12
           if kill -0 $pid 2>/dev/null; then echo "the app is running"; kill $pid; else echo "the app exited early"; wait $pid; exit 1; fi
+          hdiutil detach "$RUNNER_TEMP/rqdmg" || true
       - uses: actions/upload-artifact@v4
         with:
           name: package-${{ matrix.os.plat }}

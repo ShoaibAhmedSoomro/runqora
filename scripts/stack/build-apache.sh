@@ -7,14 +7,14 @@ HTTPD=2.4.66; APR=1.7.6; APU=1.6.3; PCRE=10.45; SSL=3.0.18
 W=$PWD/work-apache; DEPS=$W/deps; OUT=$W/out; rm -rf "$W"; mkdir -p "$W" "$DEPS" dist; cd "$W"
 
 fetch https://github.com/openssl/openssl/releases/download/openssl-$SSL/openssl-$SSL.tar.gz ssl.tgz d80c34f5cf902dccf1f1b5df5ebb86d0392e37049e5d73df1b3abae72e4ffe8b
-fetch https://github.com/PCRE2Project/pcre2/releases/download/pcre2-$PCRE/pcre2-$PCRE.tar.bz2 pcre.tbz ""
+fetch https://github.com/PCRE2Project/pcre2/releases/download/pcre2-$PCRE/pcre2-$PCRE.tar.bz2 pcre.tbz 21547f3516120c75597e5b30a992e27a592a31950b5140e7b8bfde3f192033c4
 fetch https://archive.apache.org/dist/apr/apr-$APR.tar.bz2 apr.tbz 49030d92d2575da735791b496dc322f3ce5cff9494779ba8cc28c7f46c5deb32
 fetch https://archive.apache.org/dist/apr/apr-util-$APU.tar.bz2 apu.tbz a41076e3710746326c3945042994ad9a4fcac0ce0277dd8fea076fec3c9772b5
 fetch https://archive.apache.org/dist/httpd/httpd-$HTTPD.tar.bz2 httpd.tbz 94d7ff2b42acbb828e870ba29e4cbad48e558a79c623ad3596e4116efcfea25a
 for f in ssl.tgz pcre.tbz apr.tbz apu.tbz httpd.tbz; do tar xf $f; done
 
 export CFLAGS="-O2 -fPIC"
-( cd openssl-$SSL && ./config --prefix="$DEPS" --libdir=lib no-shared no-tests no-docs >/dev/null && make -j"$NPROC" >/dev/null && make install_sw >/dev/null )
+( cd openssl-$SSL && ./config --prefix="$DEPS" --libdir=lib no-shared no-tests >/dev/null && make -j"$NPROC" >/dev/null && make install_sw >/dev/null )
 ( cd pcre2-$PCRE && ./configure --prefix="$DEPS" --disable-shared --enable-static >/dev/null && make -j"$NPROC" >/dev/null && make install >/dev/null )
 ( cd apr-$APR && ./configure --prefix="$DEPS" --disable-shared >/dev/null && make -j"$NPROC" >/dev/null && make install >/dev/null )
 ( cd apr-util-$APU && ./configure --prefix="$DEPS" --with-apr="$DEPS" --disable-shared --with-crypto --with-openssl="$DEPS" --with-expat=/usr >/dev/null 2>&1 || ./configure --prefix="$DEPS" --with-apr="$DEPS" --disable-shared --with-crypto --with-openssl="$DEPS" >/dev/null && make -j"$NPROC" >/dev/null && make install >/dev/null )

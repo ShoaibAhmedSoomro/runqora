@@ -56,6 +56,15 @@ check "stop once more" "$RQ" stop
 
 echo "HTTPS"
 check "an HTTPS certificate can be made" bash -c "'$RQ' https regenerate | grep -qi 'certificate\|authority\|expires'"
+if [ "$(uname)" = Linux ] && command -v certutil >/dev/null; then
+  check "the certificate can be trusted for browsers (NSS)" bash -c "'$RQ' https trust | grep -qi 'trust'"
+  check "and status says so" bash -c "'$RQ' https status | grep -q 'Trusted on this PC: yes'"
+  check "and the trust can be taken back" bash -c "'$RQ' https untrust | grep -qi 'no longer'"
+elif [ "$(uname)" = Darwin ]; then
+  # the login keychain may ask for a password a CI machine cannot give: shown for information, not counted
+  timeout 90 "$RQ" https trust 2>&1 | sed 's/^/        (macOS keychain) /' | head -3 || true
+  "$RQ" https untrust >/dev/null 2>&1 || true
+fi
 check "doctor finds nothing broken" bash -c "'$RQ' doctor | grep -vi 'problem' >/dev/null"
 
 has() { case " $MODULES " in *" $1 "*) return 0;; esac; return 1; }

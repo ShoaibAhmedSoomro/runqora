@@ -23,7 +23,7 @@ export CFLAGS="-O2 -fPIC"
 
 # the prefix is a marker: Runqora rewrites it (ServerRoot) when it installs and starts with `httpd -d <folder>`
 PREFIX=/__RUNQORA__/apache
-( cd httpd-$HTTPD && ./configure --prefix=$PREFIX --with-mpm=event --enable-so --enable-mods-shared=most --enable-ssl --with-ssl="$DEPS" --with-z="$DEPS" \
+( cd httpd-$HTTPD && ./configure --prefix=$PREFIX --with-mpm=event --enable-so --enable-mods-static=most --enable-ssl --with-ssl="$DEPS" --with-z="$DEPS" \
     --enable-proxy --enable-proxy-fcgi --enable-rewrite --enable-headers --enable-deflate --enable-expires --enable-http2=no \
     --with-apr="$DEPS" --with-apr-util="$DEPS" --with-pcre="$DEPS/bin/pcre2-config" --disable-lua --disable-luajit >/dev/null \
   && make -j"$NPROC" >/dev/null && make install DESTDIR="$OUT" >/dev/null )
@@ -34,14 +34,11 @@ rm -rf "$A/manual" "$A/cgi-bin" "$A/include" "$A/build" "$A/error/include"
 mkdir -p "$A/logs" "$A/htdocs"
 echo "$HTTPD" > "$A/.bundle-version"
 "$A/bin/httpd" -v | head -1
-echo "--- installed:"; ls "$A" "$A/modules" | head -80
-echo "--- compiled in:"; "$A/bin/httpd" -l || true
-# read the stock config as if it sat where Runqora will put it
-sed "s|$PREFIX|$A|g" "$A/conf/httpd.conf" > "$W/check.conf"
-mods=$("$A/bin/httpd" -d "$A" -f "$W/check.conf" -M 2>&1 || true)
-echo "$mods" | head -80
-for m in ssl_module proxy_module proxy_fcgi_module rewrite_module headers_module unixd_module deflate_module; do
-  echo "$mods" | grep -q "$m" || { echo "$m is missing from this build" >&2; exit 1; }
+# every module is linked into httpd itself: APR is built static for a relocatable bundle, and its libtool cannot make .so files
+echo "--- compiled in:"; mods=$("$A/bin/httpd" -l); echo "$mods" | tr -s '[:space:]' ' '; echo
+for m in mod_ssl mod_proxy mod_proxy_fcgi mod_rewrite mod_headers mod_unixd mod_deflate mod_dir mod_mime mod_alias; do
+  echo "$mods" | grep -q "$m.c" || { echo "$m is missing from this build" >&2; exit 1; }
 done
+rm -rf "$A/modules"
 tar -C "$A" -czf "$W/../dist/apache-$HTTPD-$PLAT.tar.gz" .
 sha256 "$W/../dist/apache-$HTTPD-$PLAT.tar.gz"
